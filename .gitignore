@@ -78,3 +78,27 @@ memory-bank/
 .claude/
 .cursor/
 CLAUDE.md
+
+# ---- 我的毕业项目自定义忽略 ----
+# 注意：.gitignore 不支持“行内注释”，注释必须独占一行，否则会被当成文件名的一部分！
+# 下载的模型权重，太大不进仓库
+models/
+# 参考论文 PDF，本地留存即可（如需备份请放到仓库外）
+*.pdf
+# 临时提取的文本
+paper1_text.txt
+
+# ---- 运行产物 / 解析临时文件 ----
+# reproduce/.env 含 API key，绝不上传（*.env* 其实已覆盖，这里再显式声明一遍更保险）
+reproduce/.env
+# MinerU 解析输出
+mineru_output/
+# 各类解析中间产物
+*_parsed/
+# 实验结果数据（建议结果单独管理）
+experiments/results/
+
+# ---- 例外：允许提交我们自己的单元测试 ----
+# 上面第 72 行的 `test_*` 会忽略所有 test_ 开头的文件，
+# 用 `!` 取反，确保 tests/ 下我们写的测试能进仓库。
+!tests/test_*.py
