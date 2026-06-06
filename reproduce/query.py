@@ -117,9 +117,10 @@ async def process_with_rag(
         )
 
         # Define LLM model function
+        # 模型名从环境变量读取：默认 gpt（原版行为），设 LLM_MODEL=qwen-plus 即用百炼 Qwen
         def llm_model_func(prompt, system_prompt=None, history_messages=[], **kwargs):
             return openai_complete_if_cache(
-                "gpt-4o-mini",
+                os.getenv("LLM_MODEL", "gpt-4o-mini"),
                 prompt,
                 system_prompt=system_prompt,
                 history_messages=history_messages,
@@ -140,7 +141,7 @@ async def process_with_rag(
             # If messages format is provided (for multimodal VLM enhanced query), use it directly
             if messages:
                 return openai_complete_if_cache(
-                    "gpt-4o-mini",
+                    os.getenv("VISION_MODEL", "gpt-4o-mini"),
                     "",
                     system_prompt=None,
                     history_messages=[],
@@ -152,7 +153,7 @@ async def process_with_rag(
             # Traditional single image format
             elif image_data:
                 return openai_complete_if_cache(
-                    "gpt-4o-mini",
+                    os.getenv("VISION_MODEL", "gpt-4o-mini"),
                     "",
                     system_prompt=None,
                     history_messages=[],
@@ -185,11 +186,11 @@ async def process_with_rag(
 
         # Define embedding function
         embedding_func = EmbeddingFunc(
-            embedding_dim=3072,
+            embedding_dim=int(os.getenv("EMBEDDING_DIM", "3072")),
             max_token_size=8192,
             func=lambda texts: openai_embed(
                 texts,
-                model="text-embedding-3-large",
+                model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-large"),
                 api_key=api_key,
                 base_url=base_url,
             ),
