@@ -35,6 +35,13 @@ from raganything.utils import (
     normalize_caption_list,
 )
 
+# L1 名称规范化（开关默认关 = 原版行为）
+from raganything.graph_fusion import (
+    is_canonicalization_enabled,
+    normalize_entity_name,
+    normalize_chunk_results,
+)
+
 
 @dataclass
 class ContextConfig:
@@ -478,6 +485,12 @@ class BaseModalProcessor:
         chunk_order_index: int = 0,
     ) -> Tuple[str, Dict[str, Any]]:
         """Create entity and text chunk"""
+        # L1 名称规范化：规范化锚点实体名（开关控制，默认关 = 原版行为）
+        if is_canonicalization_enabled():
+            entity_info = {
+                **entity_info,
+                "entity_name": normalize_entity_name(entity_info["entity_name"]),
+            }
         # Create chunk
         chunk_id = compute_mdhash_id(str(modal_chunk), prefix="chunk-")
         tokens = len(self.tokenizer.encode(modal_chunk))
@@ -762,6 +775,11 @@ class BaseModalProcessor:
             pipeline_status_lock=pipeline_status_lock,
             llm_response_cache=self.hashing_kv,
         )
+
+        # L1 名称规范化：规范化抽取出的实体/关系名（开关控制，默认关 = 原版行为）
+        if is_canonicalization_enabled():
+            modal_entity_name = normalize_entity_name(modal_entity_name)
+            chunk_results = normalize_chunk_results(chunk_results)
 
         # Add "belongs_to" relationships for all extracted entities
         processed_chunk_results = []
