@@ -188,7 +188,7 @@ async def process_with_rag(
         embedding_func = EmbeddingFunc(
             embedding_dim=int(os.getenv("EMBEDDING_DIM", "3072")),
             max_token_size=8192,
-            func=lambda texts: openai_embed(
+            func=lambda texts: openai_embed.func(
                 texts,
                 model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-large"),
                 api_key=api_key,
