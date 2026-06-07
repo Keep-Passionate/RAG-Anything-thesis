@@ -213,6 +213,12 @@ async def process_with_rag(
             device="cuda:0",
         )
 
+        # L2: 建图完成后添加同义边（ENABLE_SYNONYM_EDGES=true 时生效）
+        from raganything.graph_fusion.synonym_linker import add_synonym_edges
+        n_syn = add_synonym_edges(working_dir or "./rag_storage")
+        if n_syn:
+            logger.info("L2: added %d synonym edges", n_syn)
+
         # Example queries - demonstrating different query approaches
         logger.info("\nQuerying processed document:")
 
