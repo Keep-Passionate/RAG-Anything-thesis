@@ -263,7 +263,8 @@ async def process_with_rag(
             logger.info(f"Answer: {result}")
             logger.info(f"Correct Answer: {query['answer']}")
 
-        output_file = os.path.join(os.path.dirname(file_path), "qa_results_mix_mm.json")
+        result_name = os.getenv("RESULT_NAME", "qa_results_mix_mm.json")
+        output_file = os.path.join(os.path.dirname(file_path), result_name)
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
         logger.info(f"Results saved to {output_file}")

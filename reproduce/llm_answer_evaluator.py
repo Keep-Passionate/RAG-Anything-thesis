@@ -323,7 +323,7 @@ Respond with a JSON object:
                 try:
                     response = await asyncio.wait_for(
                         openai_complete_if_cache(
-                            model="gpt-4o-mini",
+                            model=os.getenv("EVAL_MODEL", "qwen-plus"),
                             prompt=prompt,
                             system_prompt="You are an expert evaluator. Provide accurate and fair evaluations based on the given criteria.",
                             api_key=self.config.api_key,
@@ -1693,8 +1693,13 @@ Accuracy performance by document:
             return
 
         qa_files: List[str] = []
-        # Support `qa_results_naive_mm.json` as well.
-        patterns = ["**/qa_results_naive_mm.json", "**/qa_results_naive_mm*.json"]
+        patterns = [
+            "**/qa_results_naive_mm.json",
+            "**/qa_results_naive_mm*.json",
+            "**/qa_results_mix_mm*.json",
+            "**/qa_results_baseline*.json",
+            "**/qa_results_L1*.json",
+        ]
         for pattern in patterns:
             for p in base_path.glob(pattern):
                 if p.is_file():
