@@ -1099,7 +1099,7 @@ Respond with a JSON object:
 - Average time per evaluation: {total_time/total_evaluations:.2f} seconds
 
 ## Evaluation Configuration
-- Evaluation model: gpt-4o-mini
+- Evaluation model: {os.getenv("EVAL_MODEL", "qwen-plus")}
 - Evaluation temperature: 0.1
 - Max tokens: 1000
 """
