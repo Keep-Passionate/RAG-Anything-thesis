@@ -307,6 +307,10 @@ async def process_with_rag(
         reflect_on = os.getenv("ENABLE_REFLECTION", "false").lower() in (
             "1", "true", "yes", "on"
         )
+        # 反思模式：text=方案A(仅用问题检索的上下文)；graph=方案C(额外用"答案"反向
+        # 检索图谱作为证据，抓"答案偏离检索/凭空捏造"的错误)。证据均为加分制：
+        # reflect_answer 只在"上下文不支持"时才改，不因图缺失而否定正确答案。
+        reflect_mode = os.getenv("REFLECT_MODE", "text").lower()
         results = []
         for query in queries:
             result = await rag.aquery(
@@ -318,14 +322,31 @@ async def process_with_rag(
             reflected = False
             if reflect_on:
                 try:
-                    context = await rag.aquery(
+                    # 问题检索的上下文（已含图谱实体/关系描述 + 文本块）
+                    q_ctx = await rag.aquery(
                         query["question"],
                         mode="mix",
                         only_need_context=True,
                         vlm_enhanced=False,
                     )
+                    evidence = q_ctx
+                    if reflect_mode == "graph":
+                        # 方案C：用"生成的答案"反向检索 L1+L2 图谱，核验答案自身的断言
+                        a_ctx = await rag.aquery(
+                            result,
+                            mode="mix",
+                            only_need_context=True,
+                            vlm_enhanced=False,
+                        )
+                        evidence = (
+                            "[Evidence retrieved for the QUESTION]\n"
+                            f"{(q_ctx or '')[:3500]}\n\n"
+                            "[Evidence retrieved for the ANSWER's own claims]\n"
+                            f"{(a_ctx or '')[:3500]}"
+                        )
                     result, reflected = await reflect_answer(
-                        llm_model_func, query["question"], context, result
+                        llm_model_func, query["question"], evidence, result,
+                        max_context_chars=8000,
                     )
                 except Exception as e:
                     logger.warning(f"Reflection failed, keep original answer: {e}")
