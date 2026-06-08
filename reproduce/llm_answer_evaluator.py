@@ -1703,12 +1703,10 @@ Accuracy performance by document:
             return
 
         qa_files: List[str] = []
+        # 匹配所有结果文件；具体消融条件(baseline/L1/L2_*/full…)由后面的 method 推断逻辑区分。
+        # 之前只列了 baseline/L1 模式，导致 L2 文件被漏扫——故改为统配。
         patterns = [
-            "**/qa_results_naive_mm.json",
-            "**/qa_results_naive_mm*.json",
-            "**/qa_results_mix_mm*.json",
-            "**/qa_results_baseline*.json",
-            "**/qa_results_L1*.json",
+            "**/qa_results_*.json",
         ]
         for pattern in patterns:
             for p in base_path.glob(pattern):
