@@ -255,15 +255,22 @@ async def process_with_rag(
                 base_url=base_url,
             ),
         )
+        # Reranker：默认关（=原版 baseline 行为，所有历史条件一致）。
+        # 设 ENABLE_RERANK=true 时启用 DashScope 百炼 gte-rerank（ali_rerank，端点内置），
+        # 用现有百炼 key（RERANK_BINDING_API_KEY 缺省回退到 LLM 的 api_key）。
         from functools import partial
-        from lightrag.rerank import cohere_rerank
 
-        rerank_model_func = partial(
-            cohere_rerank,
-            model=os.getenv("RERANK_MODEL"),
-            api_key=os.getenv("RERANK_BINDING_API_KEY"),
-            base_url=os.getenv("RERANK_BINDING_HOST"),
-        )
+        rerank_model_func = None
+        if os.getenv("ENABLE_RERANK", "false").lower() in ("1", "true", "yes", "on"):
+            from lightrag.rerank import ali_rerank
+
+            rerank_model_func = partial(
+                ali_rerank,
+                model=os.getenv("RERANK_MODEL", "gte-rerank-v2"),
+                api_key=os.getenv("RERANK_BINDING_API_KEY") or api_key,
+            )
+            logger.info("Reranker ENABLED: ali_rerank / gte-rerank-v2")
+
         lightrag = LightRAG(
             working_dir=working_dir,
             llm_model_func=llm_model_func,
@@ -311,13 +318,16 @@ async def process_with_rag(
         # 检索图谱作为证据，抓"答案偏离检索/凭空捏造"的错误)。证据均为加分制：
         # reflect_answer 只在"上下文不支持"时才改，不因图缺失而否定正确答案。
         reflect_mode = os.getenv("REFLECT_MODE", "text").lower()
+        # VLM 增强：默认关（=原版 baseline）。设 ENABLE_VLM=true 时，检索到的图片会以
+        # base64 交给 qwen-vl-max 看图作答，针对多模态题（DocBench 多模态题占多数）。
+        vlm_on = os.getenv("ENABLE_VLM", "false").lower() in ("1", "true", "yes", "on")
         results = []
         for query in queries:
             result = await rag.aquery(
                 query["question"],
                 mode="mix",
                 response_type="One Sentence",
-                vlm_enhanced=False,
+                vlm_enhanced=vlm_on,
             )
             reflected = False
             if reflect_on:
