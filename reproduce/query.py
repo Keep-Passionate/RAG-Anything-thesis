@@ -91,6 +91,47 @@ async def reflect_answer(llm_func, question, context, answer, max_context_chars=
     return (revised or answer), True
 
 
+# ---------------------------------------------------------------------------
+# R2：检索后多模态自反思（与上面"答案后自反思"本质不同——这里只判"检索够不够
+# 答"，不够就触发补检索，绝不改写已生成的答案，因此下行有底，不会把对的改坏）。
+# 由环境变量 ENABLE_RETRIEVAL_REFLECT 开关控制（默认关 = 原版行为）。
+# ---------------------------------------------------------------------------
+
+RETRIEVAL_SUFFICIENCY_PROMPT = """You are judging ONLY whether the retrieved context already contains the facts needed to answer the question. Do NOT answer the question.
+
+Question: {question}
+
+Retrieved context:
+{context}
+
+Reply with EXACTLY one token:
+- SUFFICIENT            (the needed fact is clearly present)
+- INSUFFICIENT_VISUAL   (the needed fact is likely in a figure/chart/photo, not present here)
+- INSUFFICIENT_TABLE    (the needed fact is likely in a numeric table, not present here)
+- INSUFFICIENT_OTHER    (the needed fact is absent for another reason)
+
+Be conservative: default to SUFFICIENT unless the specific fact the question asks for is clearly missing from the context above."""
+
+
+async def retrieval_sufficiency_check(llm_func, question, context, max_context_chars=8000):
+    """检索后充分性自检：只判"够不够答"，不答题。
+
+    返回 (verdict, need_more, want_visual)：
+      - need_more  : 是否需要补检索（verdict 以 INSUFFICIENT 开头）
+      - want_visual: 缺的信息是否疑似在图/表里（仅作记录；本 MVP 触发时统一开 VLM）
+    """
+    ctx = (context or "")[:max_context_chars]
+    verdict = (
+        await llm_func(
+            RETRIEVAL_SUFFICIENCY_PROMPT.format(question=question, context=ctx)
+        )
+        or ""
+    ).strip().upper()
+    need_more = verdict.startswith("INSUFFICIENT")
+    want_visual = ("VISUAL" in verdict) or ("TABLE" in verdict)
+    return verdict, need_more, want_visual
+
+
 def configure_logging():
     """Configure logging for the application"""
     # Get log directory path from environment variable or use current directory
@@ -321,32 +362,81 @@ async def process_with_rag(
         # VLM 增强：默认关（=原版 baseline）。设 ENABLE_VLM=true 时，检索到的图片会以
         # base64 交给 qwen-vl-max 看图作答，针对多模态题（DocBench 多模态题占多数）。
         vlm_on = os.getenv("ENABLE_VLM", "false").lower() in ("1", "true", "yes", "on")
+        # 体检（SAVE_CONTEXT）：把每题"检索到的上下文"也存进结果，供离线脚本
+        # diag_recall.py 算证据命中率（recall 代理）。默认关，不影响历史实验。
+        save_ctx = os.getenv("SAVE_CONTEXT", "false").lower() in ("1", "true", "yes", "on")
+        # R2（ENABLE_RETRIEVAL_REFLECT）：检索后自反思 + 触发补检索。默认关。
+        # 流程：取上下文 → 自检够不够答 → 不够就用更大的 top_k 重检 + 开 VLM 看图，
+        # 再答一次；够就正常答。全程 3 次调用/题，只补证据、不改答案。
+        rr_on = os.getenv("ENABLE_RETRIEVAL_REFLECT", "false").lower() in (
+            "1", "true", "yes", "on"
+        )
+        rr_top_k = int(os.getenv("RR_TOP_K", "80"))             # 默认 2×（LightRAG 默认 top_k=40）
+        rr_chunk_top_k = int(os.getenv("RR_CHUNK_TOP_K", "40"))  # 默认 2×（默认 chunk_top_k=20）
+
         results = []
         for query in queries:
-            result = await rag.aquery(
-                query["question"],
-                mode="mix",
-                response_type="One Sentence",
-                vlm_enhanced=vlm_on,
-            )
+            q = query["question"]
+            retrieved_context = None
+            rr_triggered = False
+            rr_verdict = ""
+
+            if rr_on:
+                try:
+                    retrieved_context = await rag.aquery(
+                        q, mode="mix", only_need_context=True, vlm_enhanced=False
+                    )
+                    rr_verdict, need_more, want_visual = await retrieval_sufficiency_check(
+                        llm_model_func, q, retrieved_context
+                    )
+                    if need_more:
+                        rr_triggered = True
+                        # 补检索：加大检索面捞回被挤掉的图/表块，并开 VLM 看图，再答一次
+                        result = await rag.aquery(
+                            q,
+                            mode="mix",
+                            response_type="One Sentence",
+                            vlm_enhanced=True,
+                            top_k=rr_top_k,
+                            chunk_top_k=rr_chunk_top_k,
+                            system_prompt="Answer in one concise sentence.",
+                        )
+                    else:
+                        result = await rag.aquery(
+                            q, mode="mix", response_type="One Sentence",
+                            vlm_enhanced=vlm_on,
+                        )
+                except Exception as e:
+                    logger.warning(f"Retrieval-reflect failed, fallback to normal: {e}")
+                    result = await rag.aquery(
+                        q, mode="mix", response_type="One Sentence", vlm_enhanced=vlm_on
+                    )
+            else:
+                result = await rag.aquery(
+                    q, mode="mix", response_type="One Sentence", vlm_enhanced=vlm_on
+                )
+                if save_ctx:
+                    try:
+                        retrieved_context = await rag.aquery(
+                            q, mode="mix", only_need_context=True, vlm_enhanced=False
+                        )
+                    except Exception as e:
+                        logger.warning(f"Save context failed: {e}")
+
             reflected = False
             if reflect_on:
                 try:
-                    # 问题检索的上下文（已含图谱实体/关系描述 + 文本块）
-                    q_ctx = await rag.aquery(
-                        query["question"],
-                        mode="mix",
-                        only_need_context=True,
-                        vlm_enhanced=False,
-                    )
+                    # 复用已取的上下文（没有则现取），避免重复检索
+                    q_ctx = retrieved_context
+                    if q_ctx is None:
+                        q_ctx = await rag.aquery(
+                            q, mode="mix", only_need_context=True, vlm_enhanced=False
+                        )
                     evidence = q_ctx
                     if reflect_mode == "graph":
                         # 方案C：用"生成的答案"反向检索 L1+L2 图谱，核验答案自身的断言
                         a_ctx = await rag.aquery(
-                            result,
-                            mode="mix",
-                            only_need_context=True,
-                            vlm_enhanced=False,
+                            result, mode="mix", only_need_context=True, vlm_enhanced=False
                         )
                         evidence = (
                             "[Evidence retrieved for the QUESTION]\n"
@@ -355,20 +445,24 @@ async def process_with_rag(
                             f"{(a_ctx or '')[:3500]}"
                         )
                     result, reflected = await reflect_answer(
-                        llm_model_func, query["question"], evidence, result,
-                        max_context_chars=8000,
+                        llm_model_func, q, evidence, result, max_context_chars=8000,
                     )
                 except Exception as e:
                     logger.warning(f"Reflection failed, keep original answer: {e}")
-            results.append(
-                {
-                    "question": query["question"],
-                    "answer": result,
-                    "correct_answer": query["answer"],
-                    "reflected": reflected,
-                }
-            )
-            logger.info(f"Query: {query['question']}")
+
+            rec = {
+                "question": q,
+                "answer": result,
+                "correct_answer": query["answer"],
+                "reflected": reflected,
+            }
+            if rr_on:
+                rec["rr_triggered"] = rr_triggered
+                rec["rr_verdict"] = rr_verdict
+            if save_ctx or rr_on:
+                rec["retrieved_context"] = (retrieved_context or "")[:8000]
+            results.append(rec)
+            logger.info(f"Query: {q}")
             logger.info(f"Answer: {result}")
             logger.info(f"Correct Answer: {query['answer']}")
 
