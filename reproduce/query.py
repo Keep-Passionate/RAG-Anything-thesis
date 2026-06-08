@@ -31,6 +31,66 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=".env", override=False)
 
 
+# ---------------------------------------------------------------------------
+# 方案 A：training-free 检索后自反思（critique-and-revise）
+# 由环境变量 ENABLE_REFLECTION 开关控制（默认关=原版行为，便于消融）。
+# 思路：答案生成后，用同一个 LLM 对照【检索到的上下文】批判答案；若发现
+# 不被支持/答非所问/数字人名日期错误，则据批判重写一遍。纯提示词，不训练。
+# ---------------------------------------------------------------------------
+
+REFLECT_CRITIQUE_PROMPT = """You are verifying a RAG-generated answer strictly against the retrieved context.
+
+Question: {question}
+
+Retrieved context:
+{context}
+
+Proposed answer: {answer}
+
+Check carefully:
+1. Is every factual claim in the answer supported by the context?
+2. Does it fully and directly answer the question?
+3. Are all numbers, names, and dates correct according to the context?
+
+If the answer is fully correct and grounded, reply with exactly:
+VERDICT: OK
+Otherwise reply:
+VERDICT: REVISE
+<one short line listing the concrete problems>"""
+
+REFLECT_REVISE_PROMPT = """Improve the answer so it is fully grounded in the retrieved context and directly answers the question.
+
+Question: {question}
+
+Retrieved context:
+{context}
+
+Previous answer: {answer}
+
+Problems found: {critique}
+
+Write a concise corrected answer (one or two sentences). If the context does not contain the answer, reply exactly: The document does not provide this information."""
+
+
+async def reflect_answer(llm_func, question, context, answer, max_context_chars=6000):
+    """对单个答案做一次"批判→（必要时）修订"。返回 (最终答案, 是否修订过)。"""
+    ctx = context or ""
+    if len(ctx) > max_context_chars:
+        ctx = ctx[:max_context_chars]
+    critique = await llm_func(
+        REFLECT_CRITIQUE_PROMPT.format(question=question, context=ctx, answer=answer)
+    )
+    if (critique or "").strip().upper().startswith("VERDICT: OK"):
+        return answer, False
+    revised = await llm_func(
+        REFLECT_REVISE_PROMPT.format(
+            question=question, context=ctx, answer=answer, critique=critique
+        )
+    )
+    revised = (revised or "").strip()
+    return (revised or answer), True
+
+
 def configure_logging():
     """Configure logging for the application"""
     # Get log directory path from environment variable or use current directory
@@ -244,6 +304,9 @@ async def process_with_rag(
             logger.warning(f"QA file not found: {qa_file_path}")
             return
 
+        reflect_on = os.getenv("ENABLE_REFLECTION", "false").lower() in (
+            "1", "true", "yes", "on"
+        )
         results = []
         for query in queries:
             result = await rag.aquery(
@@ -252,11 +315,26 @@ async def process_with_rag(
                 response_type="One Sentence",
                 vlm_enhanced=False,
             )
+            reflected = False
+            if reflect_on:
+                try:
+                    context = await rag.aquery(
+                        query["question"],
+                        mode="mix",
+                        only_need_context=True,
+                        vlm_enhanced=False,
+                    )
+                    result, reflected = await reflect_answer(
+                        llm_model_func, query["question"], context, result
+                    )
+                except Exception as e:
+                    logger.warning(f"Reflection failed, keep original answer: {e}")
             results.append(
                 {
                     "question": query["question"],
                     "answer": result,
                     "correct_answer": query["answer"],
+                    "reflected": reflected,
                 }
             )
             logger.info(f"Query: {query['question']}")
