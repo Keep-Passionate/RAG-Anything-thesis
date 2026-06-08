@@ -4,7 +4,48 @@
 """
 import numpy as np
 
-from raganything.graph_fusion.synonym_linker import find_synonym_pairs, _jaccard
+from raganything.graph_fusion.synonym_linker import (
+    find_synonym_pairs,
+    _jaccard,
+    _is_enumeration_variant,
+)
+
+
+# ---- 枚举判别守卫：用 doc63(Comcast 10-K)真实例子验证 ----
+
+def test_enum_guard_rejects_real_false_positives():
+    """这些都是 doc63 里观察到的"仅差编号/序号"的不同实体，必须判为枚举变体。"""
+    bad = [
+        ("0.250% Notes Due 2027", "0.250% Notes Due 2029"),
+        ("Exhibit 10.22", "Exhibit 10.23"),
+        ("Page 102", "Page 103"),
+        ("Section 4.02(a)", "Section 4.02(b)"),
+        ("Comcast of Sacramento I, LLC", "Comcast of Sacramento II, LLC"),
+        ("Fiscal Year 2020", "Fiscal Year 2019"),
+        ("¥29.7 Billion RMB", "¥26.6 Billion RMB"),
+        ("October 12 2021", "January 1, 2021"),
+        ("CIK 0001166559", "CIK 0000733125"),
+        ("Treasury Regulation §1.409A-1(c)(2)(i)(A)",
+         "Treasury Regulation §1.409A-1(c)(2)(i)(B)"),
+    ]
+    for a, b in bad:
+        assert _is_enumeration_variant(a, b), f"应判枚举变体: {a!r} vs {b!r}"
+
+
+def test_enum_guard_keeps_real_true_synonyms():
+    """这些是 doc63 里真正的同义（缩写/大小写/单复数/后缀），不能被误伤。"""
+    good = [
+        ("SEC", "Securities and Exchange Commission"),
+        ("RSUs", "Restricted Stock Units"),
+        ("MD&A", "Managements Discussion And Analysis"),
+        ("Opinion of Counsel", "Opinion Of Counsel"),
+        ("Table Of Contents", "Table of Contents"),
+        ("Debt Rating", "Debt Ratings"),
+        ("Atairos Group", "Atairos Group, Inc."),
+        ("S&P 500 Stock Index", "Standard & Poors 500 Stock Index"),
+    ]
+    for a, b in good:
+        assert not _is_enumeration_variant(a, b), f"误伤真同义: {a!r} vs {b!r}"
 
 
 def test_jaccard_basic():

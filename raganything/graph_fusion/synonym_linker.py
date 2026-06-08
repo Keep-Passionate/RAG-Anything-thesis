@@ -21,7 +21,9 @@
 import argparse
 import json
 import logging
+import re
 import time
+from collections import Counter
 from pathlib import Path
 
 import networkx as nx
@@ -30,6 +32,7 @@ import numpy as np
 from raganything.graph_fusion.config import (
     get_synonym_tau,
     get_synonym_theta,
+    is_enum_filter_enabled,
     is_synonym_edges_enabled,
 )
 
@@ -38,6 +41,11 @@ logger = logging.getLogger(__name__)
 # L2 所加边的标记：用于在 graphml 里识别/清除（区别于原版关系边）
 _SYNONYM_SOURCE_ID = "L2_synonym_linker"
 _SYNONYM_KEYWORD = "synonym"
+
+# 枚举判别守卫用的正则
+_NUM_RE = re.compile(r"\d+(?:[.,]\d+)*")        # 数字（含小数/千分位）
+_ALNUM_RE = re.compile(r"[a-z0-9]+")            # 字母数字 token（已小写）
+_ROMAN_RE = re.compile(r"^(?:i{1,3}|iv|v|vi{0,3}|ix|x{1,3})$")  # 罗马数字 i..xiii
 
 # 调参干跑的默认网格
 _DEFAULT_TAUS = (0.80, 0.85, 0.90, 0.95)
@@ -62,7 +70,36 @@ def _jaccard(a: set, b: set) -> float:
     return (len(a & b) / len(union)) if union else 0.0
 
 
-def find_synonym_pairs(names, matrix, neighbor_of, tau, theta, sim=None):
+def _is_enumeration_variant(a: str, b: str) -> bool:
+    """判断 a、b 是否"仅靠数字/序号区分的不同条目"（枚举变体），是则应拒绝同义边。
+
+    专治财报/法律文档的高频假阳性（字符串 90%+ 相同、上下文相同，cos+Jaccard 双高
+    却是不同实体）：
+      债券 '…Due 2027' vs '2029'、页码 102/103、金额 ¥29.7B/¥26.6B、章节 4.02(a)/(b)、
+      子公司 Sacramento I/II、Exhibit 10.22/10.23、CIK、日期、Fiscal Year 2020/2019 …
+
+    判据（任一成立即判为枚举变体）：
+      规则1：两名所含【数字集合】不同 → 不同编号的条目。
+      规则2：token 对称差异【仅由单/双字母或罗马数字构成】 → (a)/(b)、I/II 之类序号。
+
+    注意：缩写/全称(SEC↔Securities and Exchange Commission)、单复数(Rating↔Ratings)、
+    后缀(X↔X, Inc.)等真同义不会被误伤——它们的差异 token 较长或数字一致。
+    """
+    la, lb = a.lower(), b.lower()
+    # 规则1：数字集合不同
+    if sorted(_NUM_RE.findall(la)) != sorted(_NUM_RE.findall(lb)):
+        return True
+    # 规则2：token 对称差异仅为短序号
+    diff = Counter(_ALNUM_RE.findall(la)) - Counter(_ALNUM_RE.findall(lb))
+    diff += Counter(_ALNUM_RE.findall(lb)) - Counter(_ALNUM_RE.findall(la))
+    toks = list(diff.elements())
+    if toks and all(len(t) <= 2 or _ROMAN_RE.match(t) for t in toks):
+        return True
+    return False
+
+
+def find_synonym_pairs(names, matrix, neighbor_of, tau, theta, sim=None,
+                       exclude_enum=True):
     """纯计算：返回合格的同义实体对，按余弦降序排列。
 
     Args:
@@ -72,10 +109,11 @@ def find_synonym_pairs(names, matrix, neighbor_of, tau, theta, sim=None):
         tau         : 余弦阈值（> tau 才算语义相似）
         theta       : Jaccard 阈值（> theta 才算结构相似）
         sim         : 可选，预先算好的 N×N 余弦矩阵（调参 sweep 时复用以省时）
+        exclude_enum: 是否启用枚举判别守卫（剔除"仅差数字/序号"的枚举假阳性），默认 True
 
     Returns:
         list[(name_i, name_j, cos, jaccard)]，按 cos 降序。
-        会跳过：同名对、已经互为邻居（已有边）的对。
+        会跳过：同名对、已互为邻居（已有边）的对、枚举变体对（exclude_enum=True 时）。
     """
     n = len(names)
     if n < 2:
@@ -98,8 +136,11 @@ def find_synonym_pairs(names, matrix, neighbor_of, tau, theta, sim=None):
         if nj in si or ni in sj:
             continue  # 已直接相连，无需再加同义边
         jac = _jaccard(si, sj)
-        if jac > theta:
-            pairs.append((ni, nj, float(sim[i, j]), jac))
+        if jac <= theta:
+            continue
+        if exclude_enum and _is_enumeration_variant(ni, nj):
+            continue  # 枚举变体（债券年份/页码/章节序号/子公司 I·II 等），拒绝
+        pairs.append((ni, nj, float(sim[i, j]), jac))
 
     pairs.sort(key=lambda x: x[2], reverse=True)
     return pairs
@@ -182,7 +223,10 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False) -> int:
     if len(fnames) < 2:
         return 0
 
-    pairs = find_synonym_pairs(fnames, fmatrix, neighbor_of, tau, theta)
+    pairs = find_synonym_pairs(
+        fnames, fmatrix, neighbor_of, tau, theta,
+        exclude_enum=is_enum_filter_enabled(),
+    )
 
     ts = int(time.time())
     added = 0
@@ -243,11 +287,14 @@ def sweep_thresholds(working_dir, taus=_DEFAULT_TAUS, thetas=_DEFAULT_THETAS):
     if len(fnames) < 2:
         return {}
     sim = _cosine_sim_matrix(fmatrix)  # 只算一次，全网格复用
+    enum = is_enum_filter_enabled()
     out = {}
     for t in taus:
         for th in thetas:
             out[(t, th)] = len(
-                find_synonym_pairs(fnames, fmatrix, neighbor_of, t, th, sim=sim)
+                find_synonym_pairs(
+                    fnames, fmatrix, neighbor_of, t, th, sim=sim, exclude_enum=enum
+                )
             )
     return out
 

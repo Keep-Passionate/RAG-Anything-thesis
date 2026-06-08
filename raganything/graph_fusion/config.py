@@ -39,3 +39,12 @@ def get_synonym_tau():
 def get_synonym_theta():
     """L2 邻居 Jaccard 阈值（读 SYNONYM_THETA，默认 0.10）。"""
     return float(os.getenv("SYNONYM_THETA", "0.10"))
+
+
+def is_enum_filter_enabled():
+    """L2 枚举判别守卫是否开启（读 SYNONYM_FILTER_ENUM，默认开）。
+
+    开启后剔除"仅靠数字/序号区分的不同条目"假阳性（债券年份、页码、章节序号、
+    子公司 I/II 等）。设为 false 可做"无守卫 vs 有守卫"的对照消融。
+    """
+    return _truthy(os.getenv("SYNONYM_FILTER_ENUM", "true"))

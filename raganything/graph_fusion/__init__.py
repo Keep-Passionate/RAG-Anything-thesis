@@ -12,6 +12,7 @@ from raganything.graph_fusion.canonicalizer import (
 from raganything.graph_fusion.config import (
     is_canonicalization_enabled,
     is_synonym_edges_enabled,
+    is_enum_filter_enabled,
     get_synonym_tau,
     get_synonym_theta,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "normalize_chunk_results",
     "is_canonicalization_enabled",
     "is_synonym_edges_enabled",
+    "is_enum_filter_enabled",
     "get_synonym_tau",
     "get_synonym_theta",
     "add_synonym_edges",
