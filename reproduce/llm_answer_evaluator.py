@@ -1623,6 +1623,21 @@ Accuracy performance by document:
             pdf_names = [name for name in dir_entries if name.lower().endswith(".pdf")]
             doc_id_base = pdf_names[0] if pdf_names else os.path.basename(qa_dir)
 
+            # 按结果文件名区分消融条件（baseline/L1/L2/full）。
+            # 否则同一文档不同条件因 method 相同，会被去重逻辑当成重复而漏评，
+            # 也无法在报告里出 baseline vs L1 vs L2 对比表。
+            _fname = os.path.basename(qa_file).lower()
+            if "baseline" in _fname:
+                file_method = "baseline"
+            elif "full" in _fname:
+                file_method = "full"
+            elif "l2" in _fname:
+                file_method = "L2"
+            elif "l1" in _fname:
+                file_method = "L1"
+            else:
+                file_method = "qa"
+
             for i, item in enumerate(qa_items, 1):
                 question = str(item.get("question", "")).strip()
                 expected_answer = str(item.get("correct_answer", "")).strip()
@@ -1633,7 +1648,7 @@ Accuracy performance by document:
                     self.logger.info("  Skipping item with a missing question")
                     continue
 
-                method = "qa"
+                method = file_method
                 doc_id = doc_id_base
 
                 # Check whether this evaluation already exists.
