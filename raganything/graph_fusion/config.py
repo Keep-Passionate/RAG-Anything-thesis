@@ -18,6 +18,11 @@ L2 防过连接守卫（Step3）：
 - SYNONYM_SKIP_TYPES：按实体类型过滤（默认 "person"）——两端任一实体属于这些
   entity_type 则拒连。专治人名假阳性（同姓不同人 cos+Jaccard 双高），比调阈值治本
   （真同义与人名假阳性的 cos 同样高，阈值分不开）。置空可关闭做消融。
+- SYNONYM_CARRY_CHUNKS：同义边是否"载货"（默认 false）。诊断发现：默认实现里同义边
+  source_id 是占位符 → 检索读到边却拉不进真实文本块（"通电未载货"）。开启后把 source_id
+  设为两端实体真实 chunk 并集，检索到同义边时真正带进对端证据。⚠️ 这会同时放大真/假
+  同义边——务必先用 show_synonyms 确认精度（≥90%）再开，否则放大假阳性反而掉分。
+  默认关 = 现有 inert 行为，便于 inert vs 载货 干净消融。
 
 消融时只需在 .env / 环境变量里改这些值，跑出 baseline / +L1 / +L2 / full：
     baseline : ENABLE_CANONICALIZATION=false ENABLE_SYNONYM_EDGES=false
@@ -88,3 +93,13 @@ def get_synonym_skip_types():
     """
     raw = os.getenv("SYNONYM_SKIP_TYPES", "person")
     return {t.strip().lower() for t in raw.split(",") if t.strip()}
+
+
+def is_synonym_carry_chunks_enabled():
+    """L2 同义边是否"载货"（读 SYNONYM_CARRY_CHUNKS，默认关）。
+
+    关：source_id 用占位符，边 inert（仅作关系展示，拉不进真实证据）= 现有行为。
+    开：source_id 设为两端实体真实 chunk 并集，检索到同义边时带进对端证据。
+    ⚠️ 会放大真/假同义边，开前务必先确认精度（见 reproduce/show_synonyms.py）。
+    """
+    return _truthy(os.getenv("SYNONYM_CARRY_CHUNKS", "false"))

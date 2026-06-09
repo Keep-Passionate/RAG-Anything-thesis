@@ -15,6 +15,11 @@
   类型过滤（skip_types）：两端任一实体属于指定 entity_type（默认 person）则拒连。
          治本地解决人名假阳性（同姓不同人 cos+Jaccard 双高，阈值分不开）。
 
+载货（carry_chunks，默认关）：诊断（diag_l2_wiring.py）发现默认实现里同义边 source_id
+  是占位符，检索读到边却拉不进真实文本块（"通电未载货"）。开启后把 source_id 设为两端
+  实体真实 chunk 并集，检索到同义边时真正带进对端证据。⚠️ 会放大真/假同义边，先确认精度。
+  注：L2 边的移除/识别一律用 file_path==_SYNONYM_SOURCE_ID 标记（与 source_id 是否载货无关）。
+
 设计（便于消融/调参，刻意解耦）：
   - find_synonym_pairs(...)  : 纯计算层，只吃 numpy 矩阵 + 邻居字典，无文件/无图依赖，可单测
   - add_synonym_edges(...)   : I/O 层，读 vdb + graphml，调纯计算层，写回 graphml
@@ -45,6 +50,7 @@ from raganything.graph_fusion.config import (
     get_synonym_tau,
     get_synonym_theta,
     is_enum_filter_enabled,
+    is_synonym_carry_chunks_enabled,
     is_synonym_edges_enabled,
     is_synonym_same_doc_enabled,
 )
@@ -96,6 +102,23 @@ def _split_docs(file_path_attr) -> set:
     if not file_path_attr:
         return set()
     return {p.strip() for p in str(file_path_attr).split(GRAPH_FIELD_SEP) if p.strip()}
+
+
+def _node_source_chunks(G, name) -> set:
+    """实体节点的真实来源 chunk 集合（节点 source_id 按 GRAPH_FIELD_SEP 拆）。载货用。"""
+    raw = G.nodes.get(name, {}).get("source_id", "")
+    if not raw:
+        return set()
+    return {c for c in str(raw).split(GRAPH_FIELD_SEP) if c}
+
+
+def _is_synonym_edge(edge_attrs) -> bool:
+    """判定一条边是否为 L2 同义边。
+
+    用 file_path==_SYNONYM_SOURCE_ID 作标记——它与边是否"载货"无关（载货时 source_id
+    会变成真实 chunk，不能再当标记），所以识别/移除一律走 file_path。
+    """
+    return edge_attrs.get("file_path") == _SYNONYM_SOURCE_ID
 
 
 def _is_enumeration_variant(a: str, b: str) -> bool:
@@ -267,7 +290,7 @@ def _load_graph_and_neighbors(graphml_path, vdb_path):
 
 def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
                       require_same_doc=None, max_per_node=None,
-                      skip_types=None) -> int:
+                      skip_types=None, carry_chunks=None) -> int:
     """对 working_dir 下的知识图谱添加同义边（L2）。
 
     Args:
@@ -277,6 +300,8 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
         require_same_doc: 文档作用域守卫；None 时读 config（SYNONYM_SAME_DOC）
         max_per_node    : 每节点同义边预算；None 时读 config（SYNONYM_MAX_PER_NODE）
         skip_types      : 类型过滤集合；None 时读 config（SYNONYM_SKIP_TYPES）
+        carry_chunks    : 是否载货（source_id 设为两端真实 chunk 并集）；
+                          None 时读 config（SYNONYM_CARRY_CHUNKS）
 
     Returns:
         新增同义边数量。开关关闭且非 force 时返回 0。
@@ -292,6 +317,8 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
         max_per_node = get_synonym_max_per_node()
     if skip_types is None:
         skip_types = get_synonym_skip_types()
+    if carry_chunks is None:
+        carry_chunks = is_synonym_carry_chunks_enabled()
 
     wd, gpath, vpath = _paths(working_dir)
     if not gpath.exists() or not vpath.exists():
@@ -319,12 +346,20 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
     for ni, nj, cos, jac in pairs:
         if G.has_edge(ni, nj):
             continue
+        # 载货：source_id 设为两端真实 chunk 并集 → 检索到同义边时带进对端证据；
+        # 关闭则用占位符（边 inert，仅作关系展示）。file_path 始终作移除/识别标记。
+        if carry_chunks:
+            chunks = _node_source_chunks(G, ni) | _node_source_chunks(G, nj)
+            source_id = GRAPH_FIELD_SEP.join(sorted(chunks)) or _SYNONYM_SOURCE_ID
+        else:
+            source_id = _SYNONYM_SOURCE_ID
         G.add_edge(
             ni, nj,
             weight=round(cos, 4),
-            description=f"Synonym (L2): cos={cos:.3f}, jaccard={jac:.3f}",
+            # 有意义的关系描述（告诉 LLM 二者同指），优于纯 cos 元数据
+            description=f"{ni} and {nj} refer to the same concept (synonym, cos={cos:.2f}).",
             keywords=_SYNONYM_KEYWORD,
-            source_id=_SYNONYM_SOURCE_ID,
+            source_id=source_id,
             file_path=_SYNONYM_SOURCE_ID,
             created_at=ts,
             truncate="",
@@ -334,9 +369,10 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
     if added:
         nx.write_graphml(G, str(gpath))
     logger.info(
-        "L2: tau=%.2f theta=%.2f same_doc=%s max_per_node=%d skip_types=%s -> %d synonym edges%s",
-        tau, theta, require_same_doc, max_per_node, sorted(skip_types) or "-", added,
-        f" written to {gpath}" if added else "",
+        "L2: tau=%.2f theta=%.2f same_doc=%s max_per_node=%d skip_types=%s carry=%s"
+        " -> %d synonym edges%s",
+        tau, theta, require_same_doc, max_per_node, sorted(skip_types) or "-",
+        carry_chunks, added, f" written to {gpath}" if added else "",
     )
     return added
 
@@ -351,8 +387,7 @@ def remove_synonym_edges(working_dir) -> int:
         return 0
     G = nx.read_graphml(str(gpath))
     to_remove = [
-        (u, v) for u, v, d in G.edges(data=True)
-        if d.get("source_id") == _SYNONYM_SOURCE_ID
+        (u, v) for u, v, d in G.edges(data=True) if _is_synonym_edge(d)
     ]
     if to_remove:
         G.remove_edges_from(to_remove)
@@ -411,6 +446,8 @@ def _main():
                     help="每个实体最多新增的同义边数（0=不限；默认读 config）")
     ap.add_argument("--no-type-filter", action="store_true",
                     help="关闭类型过滤（默认跳过 person），允许人名参与配对（用于消融）")
+    ap.add_argument("--carry-chunks", action="store_true",
+                    help="载货：source_id 设为两端真实 chunk 并集，让同义边带进对端证据")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -449,6 +486,7 @@ def _main():
         require_same_doc=(False if args.cross_doc else None),
         max_per_node=args.max_per_node,
         skip_types=(set() if args.no_type_filter else None),
+        carry_chunks=(True if args.carry_chunks else None),
     )
     print("added synonym edges:", n)
 

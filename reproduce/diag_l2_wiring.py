@@ -35,6 +35,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from raganything.graph_fusion.synonym_linker import (  # noqa: E402
     _SYNONYM_SOURCE_ID,
     GRAPH_FIELD_SEP,
+    _is_synonym_edge,
     add_synonym_edges,
     remove_synonym_edges,
 )
@@ -56,7 +57,11 @@ def _count_synonym_in_rel_vdb(working_dir: Path) -> int:
         return -1
     with open(p, encoding="utf-8") as f:
         data = json.load(f).get("data", [])
-    return sum(1 for d in data if "Synonym (L2)" in json.dumps(d, ensure_ascii=False))
+    # 用 L2 描述的唯一签名 "(synonym, cos=" 精确匹配，避免把论文中真实提到
+    # "synonym" 的关系误计入（L2 边其实从不写入 vdb_relationships，应恒为 0）。
+    return sum(
+        1 for d in data if "(synonym, cos=" in json.dumps(d, ensure_ascii=False)
+    )
 
 
 def _node_chunks(G, name) -> set:
@@ -88,16 +93,14 @@ def diagnose(working_dir: str, keep: bool = False):
         return
 
     G = nx.read_graphml(str(gpath))
-    syn_edges = [
-        (u, v, d) for u, v, d in G.edges(data=True)
-        if d.get("source_id") == _SYNONYM_SOURCE_ID
-    ]
+    syn_edges = [(u, v, d) for u, v, d in G.edges(data=True) if _is_synonym_edge(d)]
 
     # ① 关系向量库里能否看到同义边
     n_in_rel_vdb = _count_synonym_in_rel_vdb(wd)
-    # ② 同义边 source_id 是不是真实 chunk id
-    src_vals = {d.get("source_id") for _, _, d in syn_edges}
-    src_is_real_chunk = {s: (s in chunk_ids) for s in src_vals}
+    # ② 边是 inert(占位符 source_id) 还是 载货(真实 chunk)
+    n_inert = sum(1 for _, _, d in syn_edges
+                  if d.get("source_id") == _SYNONYM_SOURCE_ID)
+    n_carry = len(syn_edges) - n_inert
     # ③ 若 source_id 设为两端真实 chunk 并集，能多带多少“新”证据
     #    （A 通常已是 top 实体、其 chunk 已在上下文，故新增≈B 端独有的 chunk）
     bridge_gain = []   # 每条边：两端 chunk 并集大小
@@ -111,10 +114,10 @@ def diagnose(working_dir: str, keep: bool = False):
     print(f"graphml 中同义边数            : {len(syn_edges)}")
     print(f"vdb_relationships 中同义边数  : {n_in_rel_vdb}   "
           f"{'<- 关系向量检索看不到它们' if n_in_rel_vdb == 0 else ''}")
-    print(f"同义边 source_id 取值         : {sorted(src_vals)}")
-    for s, real in src_is_real_chunk.items():
-        print(f"  source_id={s!r} 是真实 chunk 吗? {real}   "
-              f"{'<- 取文本块会查空 → 0 真实证据' if not real else ''}")
+    print(f"  其中 inert(占位符 source_id): {n_inert}   "
+          f"{'<- 取文本块查空 → 0 真实证据' if n_inert else ''}")
+    print(f"  其中 载货(真实 chunk)       : {n_carry}   "
+          f"{'<- 已能带进对端证据' if n_carry else ''}")
     if bridge_gain:
         print(f"两端 chunk 并集大小  平均 {sum(bridge_gain)/len(bridge_gain):.1f} / "
               f"最大 {max(bridge_gain)}（这是“若修好”每条边的证据上限）")
@@ -131,10 +134,14 @@ def diagnose(working_dir: str, keep: bool = False):
     print("-" * 64)
     print("结论：")
     print(" · 同义边会被检索读到（作为“关系”进上下文，operate.py 从 graphml 取边）；")
-    print(" · 但其 source_id 是占位符、且不在关系向量库 → 关系→文本块这步查空，")
-    print("   同义边带不进任何真实文本块 → 另一端实体的内容进不了上下文（“通电未载货”）；")
-    print(" · 修复方向：加边时把 source_id 设为两端真实 chunk 并集（并给有意义的")
-    print("   description，如另一端 summary），让检索到同义边时真正拉进对端证据。")
+    if n_carry and not n_inert:
+        print(" · 已载货：source_id 为两端真实 chunk → 检索到同义边时会拉进对端证据。")
+        print("   ⚠️ 载货会放大真/假同义边，务必先用 show_synonyms 确认精度再上线。")
+    else:
+        print(" · 但其 source_id 是占位符、且不在关系向量库 → 关系→文本块这步查空，")
+        print("   同义边带不进真实文本块 → 对端实体内容进不了上下文（“通电未载货”）；")
+        print(" · 修复：SYNONYM_CARRY_CHUNKS=true（或 --carry-chunks）把 source_id 设为")
+        print("   两端真实 chunk 并集，让检索到同义边时真正拉进对端证据。")
 
     if not keep:
         remove_synonym_edges(working_dir)
