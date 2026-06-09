@@ -8,6 +8,14 @@ L2 超参：
 - SYNONYM_TAU：余弦相似度阈值（默认 0.85）
 - SYNONYM_THETA：邻居 Jaccard 阈值（默认 0.10）
 
+L2 防过连接守卫（Step3）：
+- SYNONYM_SAME_DOC：文档作用域（默认 true）——两实体若无任何共同来源文档则拒连。
+  仅对"多篇文档合并在同一张图"的情形有效；每篇独立索引时图内实体同属一文档，
+  此守卫为空操作（无副作用）。设 false 可做"跨文档 vs 同文档"对照消融。
+- SYNONYM_MAX_PER_NODE：每节点同义边预算（默认 0=不限）——每个实体最多新增 K 条
+  同义边（按余弦取最高的 K 条），用于封住通用词/hub 的过连接。单篇图里治过连接
+  主要靠它，建议用 reproduce/l2_sweep.py 配合扫 K。
+
 消融时只需在 .env / 环境变量里改这些值，跑出 baseline / +L1 / +L2 / full：
     baseline : ENABLE_CANONICALIZATION=false ENABLE_SYNONYM_EDGES=false
     +L1      : ENABLE_CANONICALIZATION=true  ENABLE_SYNONYM_EDGES=false
@@ -48,3 +56,22 @@ def is_enum_filter_enabled():
     子公司 I/II 等）。设为 false 可做"无守卫 vs 有守卫"的对照消融。
     """
     return _truthy(os.getenv("SYNONYM_FILTER_ENUM", "true"))
+
+
+def is_synonym_same_doc_enabled():
+    """L2 文档作用域守卫是否开启（读 SYNONYM_SAME_DOC，默认开）。
+
+    开启后：两实体若没有任何共同来源文档（节点 file_path 集合不相交）则拒绝加同义边，
+    根除"跨文档同名/近义污染"。注意——每篇独立索引时图内实体同属一篇，此守卫为空操作。
+    设为 false 可恢复旧版 L2 行为，做"跨文档 vs 同文档"对照消融。
+    """
+    return _truthy(os.getenv("SYNONYM_SAME_DOC", "true"))
+
+
+def get_synonym_max_per_node():
+    """L2 每节点同义边预算（读 SYNONYM_MAX_PER_NODE，默认 0=不限）。
+
+    >0 时每个实体最多新增该条数的同义边（按余弦降序贪心保留最高的几条），
+    用于抑制通用词/hub 的过连接。单篇图里这是治"过连接→效率降低"的主力旋钮。
+    """
+    return int(os.getenv("SYNONYM_MAX_PER_NODE", "0"))

@@ -6,6 +6,13 @@
 结构约束（Jaccard）用于排除"营收 vs 净利润"这类语义近但含义不同的假阳性——
 真正同义的两个实体，在图里周围连接的节点（语境）大部分会重合。
 
+防过连接守卫（Step3，治"同义边连了太多不相关内容→效率降低"）：
+  规则1 文档作用域（require_same_doc）：两实体若无任何共同来源文档则拒连，根除
+         "跨文档同名/近义污染"。仅对多篇合并在同一张图的情形有效；每篇独立索引
+         时图内实体同属一篇，此守卫为空操作（无副作用）。
+  规则4 每节点预算（max_per_node）：每个实体最多新增 K 条同义边（按 cos 取最高的），
+         封住通用词/hub 的过连接。单篇图里这是治过连接的主力旋钮。
+
 设计（便于消融/调参，刻意解耦）：
   - find_synonym_pairs(...)  : 纯计算层，只吃 numpy 矩阵 + 邻居字典，无文件/无图依赖，可单测
   - add_synonym_edges(...)   : I/O 层，读 vdb + graphml，调纯计算层，写回 graphml
@@ -21,6 +28,7 @@
 import argparse
 import json
 import logging
+import os
 import re
 import time
 from collections import Counter
@@ -30,10 +38,12 @@ import networkx as nx
 import numpy as np
 
 from raganything.graph_fusion.config import (
+    get_synonym_max_per_node,
     get_synonym_tau,
     get_synonym_theta,
     is_enum_filter_enabled,
     is_synonym_edges_enabled,
+    is_synonym_same_doc_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +51,10 @@ logger = logging.getLogger(__name__)
 # L2 所加边的标记：用于在 graphml 里识别/清除（区别于原版关系边）
 _SYNONYM_SOURCE_ID = "L2_synonym_linker"
 _SYNONYM_KEYWORD = "synonym"
+
+# LightRAG 在节点属性里用此分隔符连接多来源（多 chunk / 多文档）。
+# 文档作用域守卫据此从节点 file_path 还原"该实体出现在哪些文档"。
+GRAPH_FIELD_SEP = "<SEP>"
 
 # 枚举判别守卫用的正则
 _NUM_RE = re.compile(r"\d+(?:[.,]\d+)*")        # 数字（含小数/千分位）
@@ -68,6 +82,17 @@ def _jaccard(a: set, b: set) -> float:
     """两个集合的 Jaccard 相似度 = |交| / |并|。并集为空返回 0。"""
     union = a | b
     return (len(a & b) / len(union)) if union else 0.0
+
+
+def _split_docs(file_path_attr) -> set:
+    """把节点的 file_path 属性（多文档用 GRAPH_FIELD_SEP 连接）拆成文档名集合。
+
+    例："paper1.pdf<SEP>paper2.pdf" -> {"paper1.pdf", "paper2.pdf"}。
+    属性缺失/为空返回空集（表示"文档归属未知"，由调用方决定是否放行）。
+    """
+    if not file_path_attr:
+        return set()
+    return {p.strip() for p in str(file_path_attr).split(GRAPH_FIELD_SEP) if p.strip()}
 
 
 def _is_enumeration_variant(a: str, b: str) -> bool:
@@ -99,21 +124,28 @@ def _is_enumeration_variant(a: str, b: str) -> bool:
 
 
 def find_synonym_pairs(names, matrix, neighbor_of, tau, theta, sim=None,
-                       exclude_enum=True):
+                       exclude_enum=True, doc_of=None, require_same_doc=False,
+                       max_per_node=0):
     """纯计算：返回合格的同义实体对，按余弦降序排列。
 
     Args:
-        names       : list[str]，长度 N 的实体名（与 matrix 行一一对应）
-        matrix      : np.ndarray (N, D)，实体 embedding
-        neighbor_of : dict[str, set[str]]，实体名 -> 邻居实体名集合（图结构快照）
-        tau         : 余弦阈值（> tau 才算语义相似）
-        theta       : Jaccard 阈值（> theta 才算结构相似）
-        sim         : 可选，预先算好的 N×N 余弦矩阵（调参 sweep 时复用以省时）
-        exclude_enum: 是否启用枚举判别守卫（剔除"仅差数字/序号"的枚举假阳性），默认 True
+        names          : list[str]，长度 N 的实体名（与 matrix 行一一对应）
+        matrix         : np.ndarray (N, D)，实体 embedding
+        neighbor_of    : dict[str, set[str]]，实体名 -> 邻居实体名集合（图结构快照）
+        tau            : 余弦阈值（> tau 才算语义相似）
+        theta          : Jaccard 阈值（> theta 才算结构相似）
+        sim            : 可选，预先算好的 N×N 余弦矩阵（调参 sweep 时复用以省时）
+        exclude_enum   : 是否启用枚举判别守卫（剔除"仅差数字/序号"的枚举假阳性），默认 True
+        doc_of         : 可选，dict[str, set[str]]，实体名 -> 来源文档集合（文档作用域用）
+        require_same_doc: True 时启用 Step3 规则1——两实体无任何共同来源文档则拒连
+                          （仅当 doc_of 提供时生效；某一侧文档未知则放行，不因缺元数据误杀）
+        max_per_node   : Step3 规则4——每个实体最多保留的同义边数（0=不限）。按 cos
+                          降序贪心保留，超额者丢弃，用于抑制 hub 过连接。结果确定可复现。
 
     Returns:
         list[(name_i, name_j, cos, jaccard)]，按 cos 降序。
-        会跳过：同名对、已互为邻居（已有边）的对、枚举变体对（exclude_enum=True 时）。
+        会跳过：同名对、已互为邻居（已有边）的对、枚举变体对（exclude_enum=True 时）、
+        跨文档对（require_same_doc=True 时）、超出每节点预算的对（max_per_node>0 时）。
     """
     n = len(names)
     if n < 2:
@@ -140,9 +172,27 @@ def find_synonym_pairs(names, matrix, neighbor_of, tau, theta, sim=None,
             continue
         if exclude_enum and _is_enumeration_variant(ni, nj):
             continue  # 枚举变体（债券年份/页码/章节序号/子公司 I·II 等），拒绝
+        # Step3 规则1：文档作用域。两侧文档都已知且不相交 -> 跨文档污染，拒绝。
+        if require_same_doc and doc_of is not None:
+            di, dj = doc_of.get(ni), doc_of.get(nj)
+            if di and dj and di.isdisjoint(dj):
+                continue
         pairs.append((ni, nj, float(sim[i, j]), jac))
 
     pairs.sort(key=lambda x: x[2], reverse=True)
+
+    # Step3 规则4：每节点同义边预算。已按 cos 降序，贪心保留高分边，封住 hub。
+    if max_per_node and max_per_node > 0:
+        deg = {}
+        kept = []
+        for ni, nj, cos, jac in pairs:
+            if deg.get(ni, 0) >= max_per_node or deg.get(nj, 0) >= max_per_node:
+                continue
+            kept.append((ni, nj, cos, jac))
+            deg[ni] = deg.get(ni, 0) + 1
+            deg[nj] = deg.get(nj, 0) + 1
+        pairs = kept
+
     return pairs
 
 
@@ -176,9 +226,10 @@ def _load_entity_embeddings(vdb_path: Path):
 def _load_graph_and_neighbors(graphml_path, vdb_path):
     """加载图 + 实体 embedding，并对齐到图节点空间。
 
-    返回 (G, fnames, fmatrix, neighbor_of)：
+    返回 (G, fnames, fmatrix, neighbor_of, doc_of)：
       - 只保留同时存在于图节点的实体（LightRAG 里节点 ID == entity_name）
       - neighbor_of 是【全图】的邻居快照（实体名 -> 邻居名集合）
+      - doc_of 是每个实体的来源文档集合（从节点 file_path 属性按 GRAPH_FIELD_SEP 还原）
     """
     names, matrix = _load_entity_embeddings(vdb_path)
     G = nx.read_graphml(str(graphml_path))
@@ -194,16 +245,22 @@ def _load_graph_and_neighbors(graphml_path, vdb_path):
     fnames = [names[k] for k in keep]
     fmatrix = matrix[keep] if keep else matrix[:0]
     neighbor_of = {nm: set(G.neighbors(nm)) for nm in graph_names}
-    return G, fnames, fmatrix, neighbor_of
+    doc_of = {
+        nm: _split_docs(G.nodes[nm].get("file_path", "")) for nm in graph_names
+    }
+    return G, fnames, fmatrix, neighbor_of, doc_of
 
 
-def add_synonym_edges(working_dir, tau=None, theta=None, force=False) -> int:
+def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
+                      require_same_doc=None, max_per_node=None) -> int:
     """对 working_dir 下的知识图谱添加同义边（L2）。
 
     Args:
-        working_dir : LightRAG 存储目录（含 graphml 与 vdb_entities.json）
-        tau / theta : 阈值；None 时读 config（SYNONYM_TAU / SYNONYM_THETA）
-        force       : True 时忽略 ENABLE_SYNONYM_EDGES 开关强制执行（供 CLI 用）
+        working_dir     : LightRAG 存储目录（含 graphml 与 vdb_entities.json）
+        tau / theta     : 阈值；None 时读 config（SYNONYM_TAU / SYNONYM_THETA）
+        force           : True 时忽略 ENABLE_SYNONYM_EDGES 开关强制执行（供 CLI 用）
+        require_same_doc: 文档作用域守卫；None 时读 config（SYNONYM_SAME_DOC）
+        max_per_node    : 每节点同义边预算；None 时读 config（SYNONYM_MAX_PER_NODE）
 
     Returns:
         新增同义边数量。开关关闭且非 force 时返回 0。
@@ -213,19 +270,26 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False) -> int:
 
     tau = get_synonym_tau() if tau is None else tau
     theta = get_synonym_theta() if theta is None else theta
+    if require_same_doc is None:
+        require_same_doc = is_synonym_same_doc_enabled()
+    if max_per_node is None:
+        max_per_node = get_synonym_max_per_node()
 
     wd, gpath, vpath = _paths(working_dir)
     if not gpath.exists() or not vpath.exists():
         logger.warning("L2: missing graphml or vdb under %s, skip", wd)
         return 0
 
-    G, fnames, fmatrix, neighbor_of = _load_graph_and_neighbors(gpath, vpath)
+    G, fnames, fmatrix, neighbor_of, doc_of = _load_graph_and_neighbors(gpath, vpath)
     if len(fnames) < 2:
         return 0
 
     pairs = find_synonym_pairs(
         fnames, fmatrix, neighbor_of, tau, theta,
         exclude_enum=is_enum_filter_enabled(),
+        doc_of=doc_of,
+        require_same_doc=require_same_doc,
+        max_per_node=max_per_node,
     )
 
     ts = int(time.time())
@@ -248,8 +312,9 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False) -> int:
     if added:
         nx.write_graphml(G, str(gpath))
     logger.info(
-        "L2: tau=%.2f theta=%.2f -> %d synonym edges%s",
-        tau, theta, added, f" written to {gpath}" if added else "",
+        "L2: tau=%.2f theta=%.2f same_doc=%s max_per_node=%d -> %d synonym edges%s",
+        tau, theta, require_same_doc, max_per_node, added,
+        f" written to {gpath}" if added else "",
     )
     return added
 
@@ -283,17 +348,20 @@ def sweep_thresholds(working_dir, taus=_DEFAULT_TAUS, thetas=_DEFAULT_THETAS):
     if not gpath.exists() or not vpath.exists():
         logger.warning("L2: missing graphml or vdb under %s", wd)
         return {}
-    G, fnames, fmatrix, neighbor_of = _load_graph_and_neighbors(gpath, vpath)
+    G, fnames, fmatrix, neighbor_of, doc_of = _load_graph_and_neighbors(gpath, vpath)
     if len(fnames) < 2:
         return {}
     sim = _cosine_sim_matrix(fmatrix)  # 只算一次，全网格复用
     enum = is_enum_filter_enabled()
+    same_doc = is_synonym_same_doc_enabled()
+    max_pn = get_synonym_max_per_node()
     out = {}
     for t in taus:
         for th in thetas:
             out[(t, th)] = len(
                 find_synonym_pairs(
-                    fnames, fmatrix, neighbor_of, t, th, sim=sim, exclude_enum=enum
+                    fnames, fmatrix, neighbor_of, t, th, sim=sim, exclude_enum=enum,
+                    doc_of=doc_of, require_same_doc=same_doc, max_per_node=max_pn,
                 )
             )
     return out
@@ -311,6 +379,10 @@ def _main():
     ap.add_argument("--dry-run", action="store_true",
                     help="只统计不同阈值下的候选数（不改图），用于调参")
     ap.add_argument("--remove", action="store_true", help="移除已加的同义边")
+    ap.add_argument("--cross-doc", action="store_true",
+                    help="关闭文档作用域守卫，允许跨文档配对（用于消融）")
+    ap.add_argument("--max-per-node", type=int, default=None,
+                    help="每个实体最多新增的同义边数（0=不限；默认读 config）")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -318,6 +390,12 @@ def _main():
     if args.remove:
         print("removed synonym edges:", remove_synonym_edges(args.working_dir))
         return
+
+    # 让 --cross-doc / --max-per-node 同样作用于 --dry-run（sweep 经 config 读取守卫）
+    if args.cross_doc:
+        os.environ["SYNONYM_SAME_DOC"] = "false"
+    if args.max_per_node is not None:
+        os.environ["SYNONYM_MAX_PER_NODE"] = str(args.max_per_node)
 
     if args.dry_run:
         res = sweep_thresholds(args.working_dir)
@@ -335,7 +413,11 @@ def _main():
         return
 
     # 应用模式（CLI 显式调用即视为有意为之，force=True 绕过开关）
-    n = add_synonym_edges(args.working_dir, tau=args.tau, theta=args.theta, force=True)
+    n = add_synonym_edges(
+        args.working_dir, tau=args.tau, theta=args.theta, force=True,
+        require_same_doc=(False if args.cross_doc else None),
+        max_per_node=args.max_per_node,
+    )
     print("added synonym edges:", n)
 
 

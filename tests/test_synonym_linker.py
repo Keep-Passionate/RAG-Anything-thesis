@@ -119,3 +119,74 @@ def test_deterministic_order_by_cosine():
     pairs = find_synonym_pairs(names, matrix, nb, tau=0.85, theta=0.1)
     coss = [c for *_, c, _ in [(p[0], p[1], p[2], p[3]) for p in pairs]]
     assert coss == sorted(coss, reverse=True)
+
+
+# ---- Step3 规则1：文档作用域守卫 ----
+
+def test_same_doc_guard_rejects_cross_doc_pair():
+    # Alpha、Alphabet 向量近 + 邻居重叠（本应判同义），但来自不同文档 -> 文档作用域应拒绝
+    names = ["Alpha", "Alphabet"]
+    matrix = np.array([[1, 0, 0], [0.99, 0, 0]], dtype=np.float32)
+    nb = {"Alpha": {"x", "y"}, "Alphabet": {"x", "y"}}
+    doc_of = {"Alpha": {"doc1.pdf"}, "Alphabet": {"doc2.pdf"}}
+    # 不开守卫：能找到（旧版行为）
+    assert find_synonym_pairs(names, matrix, nb, tau=0.9, theta=0.1) != []
+    # 开守卫：跨文档对被拒
+    assert find_synonym_pairs(
+        names, matrix, nb, tau=0.9, theta=0.1,
+        doc_of=doc_of, require_same_doc=True,
+    ) == []
+
+
+def test_same_doc_guard_keeps_shared_doc_pair():
+    # 两实体有共同来源文档（doc2）-> 守卫放行
+    names = ["Alpha", "Alphabet"]
+    matrix = np.array([[1, 0, 0], [0.99, 0, 0]], dtype=np.float32)
+    nb = {"Alpha": {"x", "y"}, "Alphabet": {"x", "y"}}
+    doc_of = {"Alpha": {"doc1.pdf", "doc2.pdf"}, "Alphabet": {"doc2.pdf"}}
+    pairs = find_synonym_pairs(
+        names, matrix, nb, tau=0.9, theta=0.1,
+        doc_of=doc_of, require_same_doc=True,
+    )
+    assert {frozenset((a, b)) for a, b, *_ in pairs} == {frozenset(("Alpha", "Alphabet"))}
+
+
+def test_same_doc_guard_allows_when_doc_unknown():
+    # 文档元数据缺失（空集）时不应误杀 -> 放行
+    names = ["Alpha", "Alphabet"]
+    matrix = np.array([[1, 0, 0], [0.99, 0, 0]], dtype=np.float32)
+    nb = {"Alpha": {"x", "y"}, "Alphabet": {"x", "y"}}
+    doc_of = {"Alpha": set(), "Alphabet": set()}
+    assert find_synonym_pairs(
+        names, matrix, nb, tau=0.9, theta=0.1,
+        doc_of=doc_of, require_same_doc=True,
+    ) != []
+
+
+# ---- Step3 规则4：每节点同义边预算 ----
+
+def test_max_per_node_caps_degree():
+    # Alpha 同时与 Beta、Gamma、Delta 同义（cos 递减）；后三者邻居互不重叠故彼此不成对。
+    # max_per_node=1 时 Alpha 只保留 cos 最高的一条 Alpha-Beta。
+    names = ["Alpha", "Beta", "Gamma", "Delta"]
+    matrix = np.array([
+        [1.00, 0.00, 0.0],
+        [0.98, 0.20, 0.0],   # Alpha-Beta cos 最高
+        [0.95, 0.31, 0.0],   # Alpha-Gamma 次之
+        [0.92, 0.39, 0.0],   # Alpha-Delta 再次
+    ], dtype=np.float32)
+    nb = {
+        "Alpha": {"x", "y", "z", "w"},
+        "Beta": {"x", "p"},      # 与 Alpha 交 {x}，与 Gamma/Delta 不交
+        "Gamma": {"y", "q"},     # 与 Alpha 交 {y}
+        "Delta": {"z", "r"},     # 与 Alpha 交 {z}
+    }
+    # 不限预算：Alpha 与 Beta、Gamma、Delta 三条边
+    full = find_synonym_pairs(names, matrix, nb, tau=0.9, theta=0.1)
+    a_full = [p for p in full if "Alpha" in (p[0], p[1])]
+    assert len(a_full) == 3
+    # 预算=1：Alpha 只剩 cos 最高的 Alpha-Beta
+    capped = find_synonym_pairs(names, matrix, nb, tau=0.9, theta=0.1, max_per_node=1)
+    a_cap = [p for p in capped if "Alpha" in (p[0], p[1])]
+    assert len(a_cap) == 1
+    assert frozenset((a_cap[0][0], a_cap[0][1])) == frozenset(("Alpha", "Beta"))
