@@ -76,6 +76,34 @@ async def retrieval_sufficiency_check(llm_func, question, context, max_context_c
     return verdict, need_more, want_visual
 
 
+# ---------------------------------------------------------------------------
+# 模态意图检测（纯关键词，零 LLM 成本）。
+# 用途：把 VLM 只用在真正需要看图/表的题上 —— 既正面打 DocBench 的多模态题
+# （baseline 最弱项、论文 A.5 头号失败模式 "text-centric retrieval bias"），
+# 又避免对纯文本题开 VLM 带来的成本与噪声（VLM 看错图会自信答错）。
+# 与 R2 互补：R2 用一次 LLM 判"够不够答"（贵、可能误判无解题）；本检测是免费的
+# 先验信号，可单独驱动 VLM（ENABLE_MODALITY_VLM），也喂给 R2 兜底其漏判。
+# ---------------------------------------------------------------------------
+
+_VISUAL_KWS = (
+    "figure", "fig.", "fig ", "chart", "plot", "image", "photo", "picture",
+    "diagram", "graph", "panel", "axis", "legend", "curve", "shown in",
+    "图", "图表", "图中", "如图", "曲线", "示意", "照片", "插图",
+)
+_TABLE_KWS = (
+    "table", "row", "column", "cell", "spreadsheet",
+    "表", "表格", "表中", "单元格", "列", "行",
+)
+
+
+def detect_visual_intent(question: str):
+    """纯关键词判断问题是否需要看图/表。返回 (wants_visual, wants_table)。零 LLM 成本。"""
+    q = (question or "").lower()
+    wants_table = any(k in q for k in _TABLE_KWS)
+    wants_visual = any(k in q for k in _VISUAL_KWS)
+    return wants_visual, wants_table
+
+
 def configure_logging():
     """Configure logging for the application"""
     # Get log directory path from environment variable or use current directory
@@ -296,9 +324,14 @@ async def process_with_rag(
             logger.warning(f"QA file not found: {qa_file_path}")
             return
 
-        # VLM 增强：默认关（=原版 baseline）。设 ENABLE_VLM=true 时，检索到的图片会以
-        # base64 交给 qwen-vl-max 看图作答，针对多模态题（DocBench 多模态题占多数）。
+        # VLM 增强：默认关（=原版 baseline）。设 ENABLE_VLM=true 时，对【每一题】都把
+        # 检索到的图片交给 qwen-vl-max 看图作答（全开，贵且对纯文本题加噪）。
         vlm_on = os.getenv("ENABLE_VLM", "false").lower() in ("1", "true", "yes", "on")
+        # 模态感知 VLM（默认关）：只对"有图/表意图"的题开 VLM（关键词检测，零额外成本），
+        # 精准打多模态题、纯文本题不受扰。是 ENABLE_VLM 全开之外更省更稳的折中。
+        modality_vlm_on = os.getenv("ENABLE_MODALITY_VLM", "false").lower() in (
+            "1", "true", "yes", "on"
+        )
         # 体检（SAVE_CONTEXT）：把每题"检索到的上下文"也存进结果，供离线脚本
         # diag_recall.py 算证据命中率（recall 代理）。默认关，不影响历史实验。
         save_ctx = os.getenv("SAVE_CONTEXT", "false").lower() in ("1", "true", "yes", "on")
@@ -326,6 +359,9 @@ async def process_with_rag(
                     rr_verdict, need_more, want_visual = await retrieval_sufficiency_check(
                         llm_model_func, q, retrieved_context
                     )
+                    # 关键词先验兜底 LLM 漏判：问题明说图/表就当需要视觉
+                    kw_visual, kw_table = detect_visual_intent(q)
+                    want_visual = want_visual or kw_visual or kw_table
                     if need_more:
                         rr_triggered = True
                         # 补检索：加大检索面捞回被挤掉的块；仅当缺的是视觉信息才开 VLM。
@@ -349,8 +385,14 @@ async def process_with_rag(
                         q, mode="mix", response_type="One Sentence", vlm_enhanced=vlm_on
                     )
             else:
+                # 模态感知：纯文本题用文本作答，有图/表意图的题才开 VLM（零成本检测）。
+                # ENABLE_VLM=true 时全开，优先级最高。
+                q_vlm = vlm_on
+                if modality_vlm_on and not vlm_on:
+                    kw_visual, kw_table = detect_visual_intent(q)
+                    q_vlm = kw_visual or kw_table
                 result = await rag.aquery(
-                    q, mode="mix", response_type="One Sentence", vlm_enhanced=vlm_on
+                    q, mode="mix", response_type="One Sentence", vlm_enhanced=q_vlm
                 )
                 if save_ctx:
                     try:
@@ -365,6 +407,8 @@ async def process_with_rag(
                 "answer": result,
                 "correct_answer": query["answer"],
             }
+            if modality_vlm_on and not rr_on:
+                rec["vlm_used"] = q_vlm  # 便于离线分析哪些题触发了 VLM
             if rr_on:
                 rec["rr_triggered"] = rr_triggered
                 rec["rr_verdict"] = rr_verdict
