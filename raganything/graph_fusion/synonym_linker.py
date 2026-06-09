@@ -12,6 +12,8 @@
          时图内实体同属一篇，此守卫为空操作（无副作用）。
   规则4 每节点预算（max_per_node）：每个实体最多新增 K 条同义边（按 cos 取最高的），
          封住通用词/hub 的过连接。单篇图里这是治过连接的主力旋钮。
+  类型过滤（skip_types）：两端任一实体属于指定 entity_type（默认 person）则拒连。
+         治本地解决人名假阳性（同姓不同人 cos+Jaccard 双高，阈值分不开）。
 
 设计（便于消融/调参，刻意解耦）：
   - find_synonym_pairs(...)  : 纯计算层，只吃 numpy 矩阵 + 邻居字典，无文件/无图依赖，可单测
@@ -39,6 +41,7 @@ import numpy as np
 
 from raganything.graph_fusion.config import (
     get_synonym_max_per_node,
+    get_synonym_skip_types,
     get_synonym_tau,
     get_synonym_theta,
     is_enum_filter_enabled,
@@ -125,7 +128,7 @@ def _is_enumeration_variant(a: str, b: str) -> bool:
 
 def find_synonym_pairs(names, matrix, neighbor_of, tau, theta, sim=None,
                        exclude_enum=True, doc_of=None, require_same_doc=False,
-                       max_per_node=0):
+                       max_per_node=0, type_of=None, skip_types=None):
     """纯计算：返回合格的同义实体对，按余弦降序排列。
 
     Args:
@@ -141,11 +144,15 @@ def find_synonym_pairs(names, matrix, neighbor_of, tau, theta, sim=None,
                           （仅当 doc_of 提供时生效；某一侧文档未知则放行，不因缺元数据误杀）
         max_per_node   : Step3 规则4——每个实体最多保留的同义边数（0=不限）。按 cos
                           降序贪心保留，超额者丢弃，用于抑制 hub 过连接。结果确定可复现。
+        type_of        : 可选，dict[str, str]，实体名 -> entity_type（类型过滤用）
+        skip_types     : 可选，set[str]，小写类型集合；两端任一实体属于其中则拒连
+                          （仅当 type_of 提供时生效），治人名假阳性。
 
     Returns:
         list[(name_i, name_j, cos, jaccard)]，按 cos 降序。
         会跳过：同名对、已互为邻居（已有边）的对、枚举变体对（exclude_enum=True 时）、
-        跨文档对（require_same_doc=True 时）、超出每节点预算的对（max_per_node>0 时）。
+        指定类型对（skip_types 命中时）、跨文档对（require_same_doc=True 时）、
+        超出每节点预算的对（max_per_node>0 时）。
     """
     n = len(names)
     if n < 2:
@@ -172,6 +179,11 @@ def find_synonym_pairs(names, matrix, neighbor_of, tau, theta, sim=None,
             continue
         if exclude_enum and _is_enumeration_variant(ni, nj):
             continue  # 枚举变体（债券年份/页码/章节序号/子公司 I·II 等），拒绝
+        # Step3 类型过滤：两端任一为指定类型（默认 person）-> 拒绝，治人名假阳性。
+        if skip_types and type_of is not None:
+            if (type_of.get(ni, "").lower() in skip_types
+                    or type_of.get(nj, "").lower() in skip_types):
+                continue
         # Step3 规则1：文档作用域。两侧文档都已知且不相交 -> 跨文档污染，拒绝。
         if require_same_doc and doc_of is not None:
             di, dj = doc_of.get(ni), doc_of.get(nj)
@@ -226,10 +238,11 @@ def _load_entity_embeddings(vdb_path: Path):
 def _load_graph_and_neighbors(graphml_path, vdb_path):
     """加载图 + 实体 embedding，并对齐到图节点空间。
 
-    返回 (G, fnames, fmatrix, neighbor_of, doc_of)：
+    返回 (G, fnames, fmatrix, neighbor_of, doc_of, type_of)：
       - 只保留同时存在于图节点的实体（LightRAG 里节点 ID == entity_name）
       - neighbor_of 是【全图】的邻居快照（实体名 -> 邻居名集合）
       - doc_of 是每个实体的来源文档集合（从节点 file_path 属性按 GRAPH_FIELD_SEP 还原）
+      - type_of 是每个实体的 entity_type（从节点属性读，供类型过滤用）
     """
     names, matrix = _load_entity_embeddings(vdb_path)
     G = nx.read_graphml(str(graphml_path))
@@ -248,11 +261,13 @@ def _load_graph_and_neighbors(graphml_path, vdb_path):
     doc_of = {
         nm: _split_docs(G.nodes[nm].get("file_path", "")) for nm in graph_names
     }
-    return G, fnames, fmatrix, neighbor_of, doc_of
+    type_of = {nm: str(G.nodes[nm].get("entity_type", "")) for nm in graph_names}
+    return G, fnames, fmatrix, neighbor_of, doc_of, type_of
 
 
 def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
-                      require_same_doc=None, max_per_node=None) -> int:
+                      require_same_doc=None, max_per_node=None,
+                      skip_types=None) -> int:
     """对 working_dir 下的知识图谱添加同义边（L2）。
 
     Args:
@@ -261,6 +276,7 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
         force           : True 时忽略 ENABLE_SYNONYM_EDGES 开关强制执行（供 CLI 用）
         require_same_doc: 文档作用域守卫；None 时读 config（SYNONYM_SAME_DOC）
         max_per_node    : 每节点同义边预算；None 时读 config（SYNONYM_MAX_PER_NODE）
+        skip_types      : 类型过滤集合；None 时读 config（SYNONYM_SKIP_TYPES）
 
     Returns:
         新增同义边数量。开关关闭且非 force 时返回 0。
@@ -274,13 +290,17 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
         require_same_doc = is_synonym_same_doc_enabled()
     if max_per_node is None:
         max_per_node = get_synonym_max_per_node()
+    if skip_types is None:
+        skip_types = get_synonym_skip_types()
 
     wd, gpath, vpath = _paths(working_dir)
     if not gpath.exists() or not vpath.exists():
         logger.warning("L2: missing graphml or vdb under %s, skip", wd)
         return 0
 
-    G, fnames, fmatrix, neighbor_of, doc_of = _load_graph_and_neighbors(gpath, vpath)
+    G, fnames, fmatrix, neighbor_of, doc_of, type_of = _load_graph_and_neighbors(
+        gpath, vpath
+    )
     if len(fnames) < 2:
         return 0
 
@@ -290,6 +310,8 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
         doc_of=doc_of,
         require_same_doc=require_same_doc,
         max_per_node=max_per_node,
+        type_of=type_of,
+        skip_types=skip_types,
     )
 
     ts = int(time.time())
@@ -312,8 +334,8 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
     if added:
         nx.write_graphml(G, str(gpath))
     logger.info(
-        "L2: tau=%.2f theta=%.2f same_doc=%s max_per_node=%d -> %d synonym edges%s",
-        tau, theta, require_same_doc, max_per_node, added,
+        "L2: tau=%.2f theta=%.2f same_doc=%s max_per_node=%d skip_types=%s -> %d synonym edges%s",
+        tau, theta, require_same_doc, max_per_node, sorted(skip_types) or "-", added,
         f" written to {gpath}" if added else "",
     )
     return added
@@ -348,13 +370,16 @@ def sweep_thresholds(working_dir, taus=_DEFAULT_TAUS, thetas=_DEFAULT_THETAS):
     if not gpath.exists() or not vpath.exists():
         logger.warning("L2: missing graphml or vdb under %s", wd)
         return {}
-    G, fnames, fmatrix, neighbor_of, doc_of = _load_graph_and_neighbors(gpath, vpath)
+    G, fnames, fmatrix, neighbor_of, doc_of, type_of = _load_graph_and_neighbors(
+        gpath, vpath
+    )
     if len(fnames) < 2:
         return {}
     sim = _cosine_sim_matrix(fmatrix)  # 只算一次，全网格复用
     enum = is_enum_filter_enabled()
     same_doc = is_synonym_same_doc_enabled()
     max_pn = get_synonym_max_per_node()
+    skip_types = get_synonym_skip_types()
     out = {}
     for t in taus:
         for th in thetas:
@@ -362,6 +387,7 @@ def sweep_thresholds(working_dir, taus=_DEFAULT_TAUS, thetas=_DEFAULT_THETAS):
                 find_synonym_pairs(
                     fnames, fmatrix, neighbor_of, t, th, sim=sim, exclude_enum=enum,
                     doc_of=doc_of, require_same_doc=same_doc, max_per_node=max_pn,
+                    type_of=type_of, skip_types=skip_types,
                 )
             )
     return out
@@ -383,6 +409,8 @@ def _main():
                     help="关闭文档作用域守卫，允许跨文档配对（用于消融）")
     ap.add_argument("--max-per-node", type=int, default=None,
                     help="每个实体最多新增的同义边数（0=不限；默认读 config）")
+    ap.add_argument("--no-type-filter", action="store_true",
+                    help="关闭类型过滤（默认跳过 person），允许人名参与配对（用于消融）")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -391,11 +419,14 @@ def _main():
         print("removed synonym edges:", remove_synonym_edges(args.working_dir))
         return
 
-    # 让 --cross-doc / --max-per-node 同样作用于 --dry-run（sweep 经 config 读取守卫）
+    # 让 --cross-doc / --max-per-node / --no-type-filter 同样作用于 --dry-run
+    # （sweep 经 config 读取守卫）
     if args.cross_doc:
         os.environ["SYNONYM_SAME_DOC"] = "false"
     if args.max_per_node is not None:
         os.environ["SYNONYM_MAX_PER_NODE"] = str(args.max_per_node)
+    if args.no_type_filter:
+        os.environ["SYNONYM_SKIP_TYPES"] = ""
 
     if args.dry_run:
         res = sweep_thresholds(args.working_dir)
@@ -417,6 +448,7 @@ def _main():
         args.working_dir, tau=args.tau, theta=args.theta, force=True,
         require_same_doc=(False if args.cross_doc else None),
         max_per_node=args.max_per_node,
+        skip_types=(set() if args.no_type_filter else None),
     )
     print("added synonym edges:", n)
 

@@ -15,6 +15,9 @@ L2 防过连接守卫（Step3）：
 - SYNONYM_MAX_PER_NODE：每节点同义边预算（默认 0=不限）——每个实体最多新增 K 条
   同义边（按余弦取最高的 K 条），用于封住通用词/hub 的过连接。单篇图里治过连接
   主要靠它，建议用 reproduce/l2_sweep.py 配合扫 K。
+- SYNONYM_SKIP_TYPES：按实体类型过滤（默认 "person"）——两端任一实体属于这些
+  entity_type 则拒连。专治人名假阳性（同姓不同人 cos+Jaccard 双高），比调阈值治本
+  （真同义与人名假阳性的 cos 同样高，阈值分不开）。置空可关闭做消融。
 
 消融时只需在 .env / 环境变量里改这些值，跑出 baseline / +L1 / +L2 / full：
     baseline : ENABLE_CANONICALIZATION=false ENABLE_SYNONYM_EDGES=false
@@ -75,3 +78,13 @@ def get_synonym_max_per_node():
     用于抑制通用词/hub 的过连接。单篇图里这是治"过连接→效率降低"的主力旋钮。
     """
     return int(os.getenv("SYNONYM_MAX_PER_NODE", "0"))
+
+
+def get_synonym_skip_types():
+    """L2 实体类型过滤（读 SYNONYM_SKIP_TYPES，默认 "person"）。
+
+    返回小写 entity_type 集合；两端任一实体属于其中则拒绝加同义边。
+    专治人名假阳性（'Weizhi Zhang'↔'Weizhi Chen' 同姓不同人）。置空字符串可关闭。
+    """
+    raw = os.getenv("SYNONYM_SKIP_TYPES", "person")
+    return {t.strip().lower() for t in raw.split(",") if t.strip()}

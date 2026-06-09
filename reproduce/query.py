@@ -32,68 +32,11 @@ load_dotenv(dotenv_path=".env", override=False)
 
 
 # ---------------------------------------------------------------------------
-# 方案 A：training-free 检索后自反思（critique-and-revise）
-# 由环境变量 ENABLE_REFLECTION 开关控制（默认关=原版行为，便于消融）。
-# 思路：答案生成后，用同一个 LLM 对照【检索到的上下文】批判答案；若发现
-# 不被支持/答非所问/数字人名日期错误，则据批判重写一遍。纯提示词，不训练。
-# ---------------------------------------------------------------------------
-
-REFLECT_CRITIQUE_PROMPT = """You are verifying a RAG-generated answer strictly against the retrieved context.
-
-Question: {question}
-
-Retrieved context:
-{context}
-
-Proposed answer: {answer}
-
-Check carefully:
-1. Is every factual claim in the answer supported by the context?
-2. Does it fully and directly answer the question?
-3. Are all numbers, names, and dates correct according to the context?
-
-If the answer is fully correct and grounded, reply with exactly:
-VERDICT: OK
-Otherwise reply:
-VERDICT: REVISE
-<one short line listing the concrete problems>"""
-
-REFLECT_REVISE_PROMPT = """Improve the answer so it is fully grounded in the retrieved context and directly answers the question.
-
-Question: {question}
-
-Retrieved context:
-{context}
-
-Previous answer: {answer}
-
-Problems found: {critique}
-
-Write a concise corrected answer (one or two sentences). If the context does not contain the answer, reply exactly: The document does not provide this information."""
-
-
-async def reflect_answer(llm_func, question, context, answer, max_context_chars=6000):
-    """对单个答案做一次"批判→（必要时）修订"。返回 (最终答案, 是否修订过)。"""
-    ctx = context or ""
-    if len(ctx) > max_context_chars:
-        ctx = ctx[:max_context_chars]
-    critique = await llm_func(
-        REFLECT_CRITIQUE_PROMPT.format(question=question, context=ctx, answer=answer)
-    )
-    if (critique or "").strip().upper().startswith("VERDICT: OK"):
-        return answer, False
-    revised = await llm_func(
-        REFLECT_REVISE_PROMPT.format(
-            question=question, context=ctx, answer=answer, critique=critique
-        )
-    )
-    revised = (revised or "").strip()
-    return (revised or answer), True
-
-
-# ---------------------------------------------------------------------------
-# R2：检索后多模态自反思（与上面"答案后自反思"本质不同——这里只判"检索够不够
-# 答"，不够就触发补检索，绝不改写已生成的答案，因此下行有底，不会把对的改坏）。
+# R2：检索后充分性自检 + 触发补检索（唯一保留的反思机制）。只判"检索够不够答"，
+# 不够就触发补检索（更大 top_k，缺视觉时再开 VLM 看图），绝不改写已生成的答案——
+# 因此下行有底，不会把对的改坏。
+# （已删除答案重写式自反思：方案A 实测暴跌-29，方案C answer-conditioned 易自我
+#  强化错误，均无正向收益；负向发现已存结果 JSON 与论文，代码不再保留。）
 # 由环境变量 ENABLE_RETRIEVAL_REFLECT 开关控制（默认关 = 原版行为）。
 # ---------------------------------------------------------------------------
 
@@ -123,7 +66,8 @@ async def retrieval_sufficiency_check(llm_func, question, context, max_context_c
     ctx = (context or "")[:max_context_chars]
     verdict = (
         await llm_func(
-            RETRIEVAL_SUFFICIENCY_PROMPT.format(question=question, context=ctx)
+            RETRIEVAL_SUFFICIENCY_PROMPT.format(question=question, context=ctx),
+            temperature=0,  # 判定类调用固定温度，保证可复现
         )
         or ""
     ).strip().upper()
@@ -352,13 +296,6 @@ async def process_with_rag(
             logger.warning(f"QA file not found: {qa_file_path}")
             return
 
-        reflect_on = os.getenv("ENABLE_REFLECTION", "false").lower() in (
-            "1", "true", "yes", "on"
-        )
-        # 反思模式：text=方案A(仅用问题检索的上下文)；graph=方案C(额外用"答案"反向
-        # 检索图谱作为证据，抓"答案偏离检索/凭空捏造"的错误)。证据均为加分制：
-        # reflect_answer 只在"上下文不支持"时才改，不因图缺失而否定正确答案。
-        reflect_mode = os.getenv("REFLECT_MODE", "text").lower()
         # VLM 增强：默认关（=原版 baseline）。设 ENABLE_VLM=true 时，检索到的图片会以
         # base64 交给 qwen-vl-max 看图作答，针对多模态题（DocBench 多模态题占多数）。
         vlm_on = os.getenv("ENABLE_VLM", "false").lower() in ("1", "true", "yes", "on")
@@ -366,8 +303,8 @@ async def process_with_rag(
         # diag_recall.py 算证据命中率（recall 代理）。默认关，不影响历史实验。
         save_ctx = os.getenv("SAVE_CONTEXT", "false").lower() in ("1", "true", "yes", "on")
         # R2（ENABLE_RETRIEVAL_REFLECT）：检索后自反思 + 触发补检索。默认关。
-        # 流程：取上下文 → 自检够不够答 → 不够就用更大的 top_k 重检 + 开 VLM 看图，
-        # 再答一次；够就正常答。全程 3 次调用/题，只补证据、不改答案。
+        # 流程：取上下文 → 自检够不够答 → 不够就用更大的 top_k 重检，且仅当缺的是
+        # 视觉(图/表)信息时才开 VLM 看图 → 再答一次；够就正常答。只补证据、不改答案。
         rr_on = os.getenv("ENABLE_RETRIEVAL_REFLECT", "false").lower() in (
             "1", "true", "yes", "on"
         )
@@ -391,15 +328,15 @@ async def process_with_rag(
                     )
                     if need_more:
                         rr_triggered = True
-                        # 补检索：加大检索面捞回被挤掉的图/表块，并开 VLM 看图，再答一次
+                        # 补检索：加大检索面捞回被挤掉的块；仅当缺的是视觉信息才开 VLM。
+                        # 除 top_k / VLM 外，prompt 与正常分支保持一致，便于干净消融。
                         result = await rag.aquery(
                             q,
                             mode="mix",
                             response_type="One Sentence",
-                            vlm_enhanced=True,
+                            vlm_enhanced=want_visual,
                             top_k=rr_top_k,
                             chunk_top_k=rr_chunk_top_k,
-                            system_prompt="Answer in one concise sentence.",
                         )
                     else:
                         result = await rag.aquery(
@@ -423,38 +360,10 @@ async def process_with_rag(
                     except Exception as e:
                         logger.warning(f"Save context failed: {e}")
 
-            reflected = False
-            if reflect_on:
-                try:
-                    # 复用已取的上下文（没有则现取），避免重复检索
-                    q_ctx = retrieved_context
-                    if q_ctx is None:
-                        q_ctx = await rag.aquery(
-                            q, mode="mix", only_need_context=True, vlm_enhanced=False
-                        )
-                    evidence = q_ctx
-                    if reflect_mode == "graph":
-                        # 方案C：用"生成的答案"反向检索 L1+L2 图谱，核验答案自身的断言
-                        a_ctx = await rag.aquery(
-                            result, mode="mix", only_need_context=True, vlm_enhanced=False
-                        )
-                        evidence = (
-                            "[Evidence retrieved for the QUESTION]\n"
-                            f"{(q_ctx or '')[:3500]}\n\n"
-                            "[Evidence retrieved for the ANSWER's own claims]\n"
-                            f"{(a_ctx or '')[:3500]}"
-                        )
-                    result, reflected = await reflect_answer(
-                        llm_model_func, q, evidence, result, max_context_chars=8000,
-                    )
-                except Exception as e:
-                    logger.warning(f"Reflection failed, keep original answer: {e}")
-
             rec = {
                 "question": q,
                 "answer": result,
                 "correct_answer": query["answer"],
-                "reflected": reflected,
             }
             if rr_on:
                 rec["rr_triggered"] = rr_triggered

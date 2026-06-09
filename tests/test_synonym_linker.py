@@ -190,3 +190,33 @@ def test_max_per_node_caps_degree():
     a_cap = [p for p in capped if "Alpha" in (p[0], p[1])]
     assert len(a_cap) == 1
     assert frozenset((a_cap[0][0], a_cap[0][1])) == frozenset(("Alpha", "Beta"))
+
+
+# ---- Step3 类型过滤：跳过 person 治人名假阳性 ----
+
+def test_skip_types_rejects_person_pairs():
+    # 同姓不同人：cos+Jaccard 双高（共同作者邻居重合）本会误连；类型过滤(person)应拒
+    names = ["Weizhi Zhang", "Weizhi Chen"]
+    matrix = np.array([[1, 0, 0], [0.99, 0, 0]], dtype=np.float32)
+    nb = {"Weizhi Zhang": {"Coauthor", "Paper"}, "Weizhi Chen": {"Coauthor", "Paper"}}
+    type_of = {"Weizhi Zhang": "person", "Weizhi Chen": "person"}
+    # 不过滤：会误连（旧版行为）
+    assert find_synonym_pairs(names, matrix, nb, tau=0.9, theta=0.1) != []
+    # 过滤 person：被拒
+    assert find_synonym_pairs(
+        names, matrix, nb, tau=0.9, theta=0.1,
+        type_of=type_of, skip_types={"person"},
+    ) == []
+
+
+def test_skip_types_keeps_nonperson_pairs():
+    # 非 person 类型(method)不受 person 过滤影响
+    names = ["LightRAG", "Light RAG"]
+    matrix = np.array([[1, 0, 0], [0.99, 0, 0]], dtype=np.float32)
+    nb = {"LightRAG": {"x", "y"}, "Light RAG": {"x", "y"}}
+    type_of = {"LightRAG": "method", "Light RAG": "method"}
+    pairs = find_synonym_pairs(
+        names, matrix, nb, tau=0.9, theta=0.1,
+        type_of=type_of, skip_types={"person"},
+    )
+    assert {frozenset((a, b)) for a, b, *_ in pairs} == {frozenset(("LightRAG", "Light RAG"))}
