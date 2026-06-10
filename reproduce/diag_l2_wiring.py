@@ -34,8 +34,8 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from raganything.graph_fusion.synonym_linker import (  # noqa: E402
     _SYNONYM_SOURCE_ID,
-    GRAPH_FIELD_SEP,
     _is_synonym_edge,
+    _node_source_chunks,
     add_synonym_edges,
     remove_synonym_edges,
 )
@@ -62,14 +62,6 @@ def _count_synonym_in_rel_vdb(working_dir: Path) -> int:
     return sum(
         1 for d in data if "(synonym, cos=" in json.dumps(d, ensure_ascii=False)
     )
-
-
-def _node_chunks(G, name) -> set:
-    """实体节点的真实来源 chunk 集合（节点 source_id 按 GRAPH_FIELD_SEP 拆）。"""
-    raw = G.nodes.get(name, {}).get("source_id", "")
-    if not raw:
-        return set()
-    return {c for c in str(raw).split(GRAPH_FIELD_SEP) if c}
 
 
 def diagnose(working_dir: str, keep: bool = False):
@@ -106,7 +98,7 @@ def diagnose(working_dir: str, keep: bool = False):
     bridge_gain = []   # 每条边：两端 chunk 并集大小
     bridge_new = []    # 每条边：相对另一端的“净新增”近似（取较小端，保守）
     for u, v, _ in syn_edges:
-        cu, cv = _node_chunks(G, u), _node_chunks(G, v)
+        cu, cv = _node_source_chunks(G, u), _node_source_chunks(G, v)
         bridge_gain.append(len(cu | cv))
         bridge_new.append(min(len(cu - cv), len(cv - cu)))
 
@@ -127,7 +119,7 @@ def diagnose(working_dir: str, keep: bool = False):
     print("-" * 64)
     print("样本同义边（前 8）：")
     for u, v, d in syn_edges[:8]:
-        cu, cv = _node_chunks(G, u), _node_chunks(G, v)
+        cu, cv = _node_source_chunks(G, u), _node_source_chunks(G, v)
         print(f"  {u!r} ~ {v!r} | desc={d.get('description','')[:38]} | "
               f"A.chunks={len(cu)} B.chunks={len(cv)}")
 

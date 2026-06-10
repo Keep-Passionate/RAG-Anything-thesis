@@ -31,6 +31,11 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=".env", override=False)
 
 
+def _env_on(name: str, default: str = "false") -> bool:
+    """读布尔开关环境变量：1/true/yes/on（不分大小写）为真。统一各功能开关的解析。"""
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
 # ---------------------------------------------------------------------------
 # R2：检索后充分性自检 + 触发补检索（唯一保留的反思机制）。只判"检索够不够答"，
 # 不够就触发补检索（更大 top_k，缺视觉时再开 VLM 看图），绝不改写已生成的答案——
@@ -279,7 +284,7 @@ async def process_with_rag(
         from functools import partial
 
         rerank_model_func = None
-        if os.getenv("ENABLE_RERANK", "false").lower() in ("1", "true", "yes", "on"):
+        if _env_on("ENABLE_RERANK"):
             from lightrag.rerank import ali_rerank
 
             rerank_model_func = partial(
@@ -331,21 +336,17 @@ async def process_with_rag(
 
         # VLM 增强：默认关（=原版 baseline）。设 ENABLE_VLM=true 时，对【每一题】都把
         # 检索到的图片交给 qwen-vl-max 看图作答（全开，贵且对纯文本题加噪）。
-        vlm_on = os.getenv("ENABLE_VLM", "false").lower() in ("1", "true", "yes", "on")
+        vlm_on = _env_on("ENABLE_VLM")
         # 模态感知 VLM（默认关）：只对"有图/表意图"的题开 VLM（关键词检测，零额外成本），
         # 精准打多模态题、纯文本题不受扰。是 ENABLE_VLM 全开之外更省更稳的折中。
-        modality_vlm_on = os.getenv("ENABLE_MODALITY_VLM", "false").lower() in (
-            "1", "true", "yes", "on"
-        )
+        modality_vlm_on = _env_on("ENABLE_MODALITY_VLM")
         # 体检（SAVE_CONTEXT）：把每题"检索到的上下文"也存进结果，供离线脚本
         # diag_recall.py 算证据命中率（recall 代理）。默认关，不影响历史实验。
-        save_ctx = os.getenv("SAVE_CONTEXT", "false").lower() in ("1", "true", "yes", "on")
+        save_ctx = _env_on("SAVE_CONTEXT")
         # R2（ENABLE_RETRIEVAL_REFLECT）：检索后自反思 + 触发补检索。默认关。
         # 流程：取上下文 → 自检够不够答 → 不够就用更大的 top_k 重检，且仅当缺的是
         # 视觉(图/表)信息时才开 VLM 看图 → 再答一次；够就正常答。只补证据、不改答案。
-        rr_on = os.getenv("ENABLE_RETRIEVAL_REFLECT", "false").lower() in (
-            "1", "true", "yes", "on"
-        )
+        rr_on = _env_on("ENABLE_RETRIEVAL_REFLECT")
         rr_top_k = int(os.getenv("RR_TOP_K", "80"))             # 默认 2×（LightRAG 默认 top_k=40）
         rr_chunk_top_k = int(os.getenv("RR_CHUNK_TOP_K", "40"))  # 默认 2×（默认 chunk_top_k=20）
 
