@@ -117,7 +117,9 @@ async def process_with_rag(
 
         # Define LLM model function
         # 模型名从环境变量读取：默认 gpt（原版行为），设 LLM_MODEL=qwen-plus 即用百炼 Qwen
+        # 温度默认 0（贪心解码）：让建图(实体/关系抽取)对同一输入确定可复现，未来重建索引一致。
         def llm_model_func(prompt, system_prompt=None, history_messages=[], **kwargs):
+            kwargs.setdefault("temperature", float(os.getenv("LLM_TEMPERATURE", "0")))
             return openai_complete_if_cache(
                 os.getenv("LLM_MODEL", "gpt-4o-mini"),
                 prompt,
@@ -137,6 +139,7 @@ async def process_with_rag(
             messages=None,
             **kwargs,
         ):
+            kwargs.setdefault("temperature", float(os.getenv("LLM_TEMPERATURE", "0")))
             # If messages format is provided (for multimodal VLM enhanced query), use it directly
             if messages:
                 return openai_complete_if_cache(

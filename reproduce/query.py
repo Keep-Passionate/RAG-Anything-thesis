@@ -191,7 +191,10 @@ async def process_with_rag(
 
         # Define LLM model function
         # 模型名从环境变量读取：默认 gpt（原版行为），设 LLM_MODEL=qwen-plus 即用百炼 Qwen
+        # 温度默认 0（贪心解码）：让答案对同一输入【确定可复现】，否则同一题每次跑结果不同，
+        # 在小评测集上会把"真实涨点"淹没在随机抖动里、根本看不出来。可用 LLM_TEMPERATURE 改。
         def llm_model_func(prompt, system_prompt=None, history_messages=[], **kwargs):
+            kwargs.setdefault("temperature", float(os.getenv("LLM_TEMPERATURE", "0")))
             return openai_complete_if_cache(
                 os.getenv("LLM_MODEL", "gpt-4o-mini"),
                 prompt,
@@ -211,6 +214,8 @@ async def process_with_rag(
             messages=None,
             **kwargs,
         ):
+            # 同样固定温度（看图作答也要可复现）
+            kwargs.setdefault("temperature", float(os.getenv("LLM_TEMPERATURE", "0")))
             # If messages format is provided (for multimodal VLM enhanced query), use it directly
             if messages:
                 return openai_complete_if_cache(
