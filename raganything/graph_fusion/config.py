@@ -23,6 +23,10 @@ L2 防过连接守卫（Step3）：
   设为两端实体真实 chunk 并集，检索到同义边时真正带进对端证据。⚠️ 这会同时放大真/假
   同义边——务必先用 show_synonyms 确认精度（≥90%）再开，否则放大假阳性反而掉分。
   默认关 = 现有 inert 行为，便于 inert vs 载货 干净消融。
+- SYNONYM_REQUIRE_SAME_TYPE：精度守卫 A（默认 true）。两端 entity_type 不同则拒连。
+- SYNONYM_REQUIRE_NAME_MATCH：精度守卫 B（默认 true）。名字须"沾边"（包含/缩写/字符
+  高度相似）才连，丢掉"仅描述相似、名字无关"的假阳性。
+  （A、B 都偏向"宁可漏连不可连错"，因为载货后连错会主动拉进错误证据。设 false 可消融。）
 
 消融时只需在 .env / 环境变量里改这些值，跑出 baseline / +L1 / +L2 / full：
     baseline : ENABLE_CANONICALIZATION=false ENABLE_SYNONYM_EDGES=false
@@ -103,3 +107,23 @@ def is_synonym_carry_chunks_enabled():
     ⚠️ 会放大真/假同义边，开前务必先确认精度（见 reproduce/show_synonyms.py）。
     """
     return _truthy(os.getenv("SYNONYM_CARRY_CHUNKS", "false"))
+
+
+def is_synonym_require_same_type_enabled():
+    """L2 是否要求两端实体同类型才连（读 SYNONYM_REQUIRE_SAME_TYPE，默认开）。
+
+    精度守卫 A：entity_type 不同则拒连（method 不连 concept）。挡跨类型误连。
+    代价：类型标注有噪声时可能漏掉个别真同义（漏连=中性，符合"连错比漏连更糟"）。
+    设 false 关闭做消融。
+    """
+    return _truthy(os.getenv("SYNONYM_REQUIRE_SAME_TYPE", "true"))
+
+
+def is_synonym_require_name_match_enabled():
+    """L2 是否要求两端名字"沾边"才连（读 SYNONYM_REQUIRE_NAME_MATCH，默认开）。
+
+    精度守卫 B：只接受"一方包含另一方 / 互为缩写 / 字符高度相似"，丢掉"仅共享一个词"。
+    专治"描述像但名字无关"的假阳性（cos 被实体 summary 样板带高所致）。
+    代价：漏掉换词同义（如 'Text-Centric Bias' vs 'Bias Toward Text'）。设 false 关闭。
+    """
+    return _truthy(os.getenv("SYNONYM_REQUIRE_NAME_MATCH", "true"))

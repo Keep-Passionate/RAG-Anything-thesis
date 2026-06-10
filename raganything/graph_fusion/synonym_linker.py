@@ -33,6 +33,7 @@
 """
 
 import argparse
+import difflib
 import json
 import logging
 import os
@@ -52,6 +53,8 @@ from raganything.graph_fusion.config import (
     is_enum_filter_enabled,
     is_synonym_carry_chunks_enabled,
     is_synonym_edges_enabled,
+    is_synonym_require_name_match_enabled,
+    is_synonym_require_same_type_enabled,
     is_synonym_same_doc_enabled,
 )
 
@@ -149,9 +152,48 @@ def _is_enumeration_variant(a: str, b: str) -> bool:
     return False
 
 
+# 缩写判定时忽略的虚词
+_ACRONYM_STOP = {"and", "of", "the", "for", "a", "an", "to", "in", "on", "&"}
+_NAME_SPLIT = re.compile(r"[\s\-/]+")
+
+
+def _acronym_of(short: str, long_: str) -> bool:
+    """short 是否是 long_ 的首字母缩写（忽略 and/of/the 等虚词）。
+
+    例：'SEC' 是 'Securities and Exchange Commission' 的缩写。
+    """
+    words = [w for w in _NAME_SPLIT.split(long_.lower()) if w and w not in _ACRONYM_STOP]
+    initials = "".join(w[0] for w in words)
+    s = re.sub(r"[^a-z0-9]", "", short.lower())
+    return len(s) >= 2 and len(words) >= 2 and s == initials
+
+
+def _names_name_match(a: str, b: str) -> bool:
+    """名字是否"沾边"（精度守卫 B）。接受四类真同义常见形态，其余拒绝：
+
+      1. 一方包含另一方（'Hybrid Retrieval' ⊂ 'Hybrid Retrieval Mechanism'）；
+      2. 互为首字母缩写（'SEC' ↔ 'Securities and Exchange Commission'）；
+      3. 字符级高度相似 ratio≥0.85（单复数/拼写：'Rating'↔'Ratings'、'color'↔'colour'）。
+
+    刻意【不】接受"仅共享一个词"——那会放行 'Net income' vs 'Operating income' 这类
+    换词的不同概念（描述相似 → cos 高，但并非同义）。宁可漏连不可连错。
+    """
+    la, lb = a.lower().strip(), b.lower().strip()
+    if not la or not lb:
+        return False
+    if la == lb or la in lb or lb in la:           # 1. 包含
+        return True
+    if _acronym_of(a, b) or _acronym_of(b, a):     # 2. 缩写
+        return True
+    if difflib.SequenceMatcher(None, la, lb).ratio() >= 0.85:  # 3. 字符高相似
+        return True
+    return False
+
+
 def find_synonym_pairs(names, matrix, neighbor_of, tau, theta, sim=None,
                        exclude_enum=True, doc_of=None, require_same_doc=False,
-                       max_per_node=0, type_of=None, skip_types=None):
+                       max_per_node=0, type_of=None, skip_types=None,
+                       require_same_type=False, require_name_match=False):
     """纯计算：返回合格的同义实体对，按余弦降序排列。
 
     Args:
@@ -167,9 +209,11 @@ def find_synonym_pairs(names, matrix, neighbor_of, tau, theta, sim=None,
                           （仅当 doc_of 提供时生效；某一侧文档未知则放行，不因缺元数据误杀）
         max_per_node   : Step3 规则4——每个实体最多保留的同义边数（0=不限）。按 cos
                           降序贪心保留，超额者丢弃，用于抑制 hub 过连接。结果确定可复现。
-        type_of        : 可选，dict[str, str]，实体名 -> entity_type（类型过滤用）
+        type_of        : 可选，dict[str, str]，实体名 -> entity_type（类型过滤/同类型用）
         skip_types     : 可选，set[str]，小写类型集合；两端任一实体属于其中则拒连
                           （仅当 type_of 提供时生效），治人名假阳性。
+        require_same_type: 精度守卫 A——两端 entity_type 不同则拒连（需 type_of）。
+        require_name_match: 精度守卫 B——名字不"沾边"（包含/缩写/字符高相似）则拒连。
 
     Returns:
         list[(name_i, name_j, cos, jaccard)]，按 cos 降序。
@@ -207,6 +251,14 @@ def find_synonym_pairs(names, matrix, neighbor_of, tau, theta, sim=None,
             if (type_of.get(ni, "").lower() in skip_types
                     or type_of.get(nj, "").lower() in skip_types):
                 continue
+        # 精度守卫 A：要求同 entity_type（两端类型都已知且不同 -> 拒）。
+        if require_same_type and type_of is not None:
+            ti, tj = type_of.get(ni, ""), type_of.get(nj, "")
+            if ti and tj and ti.lower() != tj.lower():
+                continue
+        # 精度守卫 B：名字须"沾边"（包含/缩写/字符高相似），否则拒。
+        if require_name_match and not _names_name_match(ni, nj):
+            continue
         # Step3 规则1：文档作用域。两侧文档都已知且不相交 -> 跨文档污染，拒绝。
         if require_same_doc and doc_of is not None:
             di, dj = doc_of.get(ni), doc_of.get(nj)
@@ -290,7 +342,8 @@ def _load_graph_and_neighbors(graphml_path, vdb_path):
 
 def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
                       require_same_doc=None, max_per_node=None,
-                      skip_types=None, carry_chunks=None) -> int:
+                      skip_types=None, carry_chunks=None,
+                      require_same_type=None, require_name_match=None) -> int:
     """对 working_dir 下的知识图谱添加同义边（L2）。
 
     Args:
@@ -319,6 +372,10 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
         skip_types = get_synonym_skip_types()
     if carry_chunks is None:
         carry_chunks = is_synonym_carry_chunks_enabled()
+    if require_same_type is None:
+        require_same_type = is_synonym_require_same_type_enabled()
+    if require_name_match is None:
+        require_name_match = is_synonym_require_name_match_enabled()
 
     wd, gpath, vpath = _paths(working_dir)
     if not gpath.exists() or not vpath.exists():
@@ -339,6 +396,8 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
         max_per_node=max_per_node,
         type_of=type_of,
         skip_types=skip_types,
+        require_same_type=require_same_type,
+        require_name_match=require_name_match,
     )
 
     ts = int(time.time())
@@ -370,9 +429,10 @@ def add_synonym_edges(working_dir, tau=None, theta=None, force=False,
         nx.write_graphml(G, str(gpath))
     logger.info(
         "L2: tau=%.2f theta=%.2f same_doc=%s max_per_node=%d skip_types=%s carry=%s"
-        " -> %d synonym edges%s",
+        " same_type=%s name_match=%s -> %d synonym edges%s",
         tau, theta, require_same_doc, max_per_node, sorted(skip_types) or "-",
-        carry_chunks, added, f" written to {gpath}" if added else "",
+        carry_chunks, require_same_type, require_name_match, added,
+        f" written to {gpath}" if added else "",
     )
     return added
 
@@ -415,6 +475,8 @@ def sweep_thresholds(working_dir, taus=_DEFAULT_TAUS, thetas=_DEFAULT_THETAS):
     same_doc = is_synonym_same_doc_enabled()
     max_pn = get_synonym_max_per_node()
     skip_types = get_synonym_skip_types()
+    same_type = is_synonym_require_same_type_enabled()
+    name_match = is_synonym_require_name_match_enabled()
     out = {}
     for t in taus:
         for th in thetas:
@@ -423,6 +485,7 @@ def sweep_thresholds(working_dir, taus=_DEFAULT_TAUS, thetas=_DEFAULT_THETAS):
                     fnames, fmatrix, neighbor_of, t, th, sim=sim, exclude_enum=enum,
                     doc_of=doc_of, require_same_doc=same_doc, max_per_node=max_pn,
                     type_of=type_of, skip_types=skip_types,
+                    require_same_type=same_type, require_name_match=name_match,
                 )
             )
     return out
@@ -448,6 +511,10 @@ def _main():
                     help="关闭类型过滤（默认跳过 person），允许人名参与配对（用于消融）")
     ap.add_argument("--carry-chunks", action="store_true",
                     help="载货：source_id 设为两端真实 chunk 并集，让同义边带进对端证据")
+    ap.add_argument("--no-same-type", action="store_true",
+                    help="关闭精度守卫A（同类型才连），用于消融")
+    ap.add_argument("--no-name-match", action="store_true",
+                    help="关闭精度守卫B（名字须沾边），用于消融")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -464,6 +531,10 @@ def _main():
         os.environ["SYNONYM_MAX_PER_NODE"] = str(args.max_per_node)
     if args.no_type_filter:
         os.environ["SYNONYM_SKIP_TYPES"] = ""
+    if args.no_same_type:
+        os.environ["SYNONYM_REQUIRE_SAME_TYPE"] = "false"
+    if args.no_name_match:
+        os.environ["SYNONYM_REQUIRE_NAME_MATCH"] = "false"
 
     if args.dry_run:
         res = sweep_thresholds(args.working_dir)
@@ -487,6 +558,8 @@ def _main():
         max_per_node=args.max_per_node,
         skip_types=(set() if args.no_type_filter else None),
         carry_chunks=(True if args.carry_chunks else None),
+        require_same_type=(False if args.no_same_type else None),
+        require_name_match=(False if args.no_name_match else None),
     )
     print("added synonym edges:", n)
 

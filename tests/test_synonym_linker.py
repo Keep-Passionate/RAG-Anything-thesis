@@ -8,6 +8,8 @@ from raganything.graph_fusion.synonym_linker import (
     find_synonym_pairs,
     _jaccard,
     _is_enumeration_variant,
+    _names_name_match,
+    _acronym_of,
 )
 
 
@@ -220,3 +222,76 @@ def test_skip_types_keeps_nonperson_pairs():
         type_of=type_of, skip_types={"person"},
     )
     assert {frozenset((a, b)) for a, b, *_ in pairs} == {frozenset(("LightRAG", "Light RAG"))}
+
+
+# ---- 精度守卫 A：同类型才连 ----
+
+def test_require_same_type_rejects_cross_type():
+    names = ["Alpha", "Beta"]
+    matrix = np.array([[1, 0, 0], [0.99, 0, 0]], dtype=np.float32)
+    nb = {"Alpha": {"x", "y"}, "Beta": {"x", "y"}}
+    type_of = {"Alpha": "method", "Beta": "concept"}
+    # 不开守卫：会连
+    assert find_synonym_pairs(names, matrix, nb, tau=0.9, theta=0.1) != []
+    # 开 same_type：跨类型被拒
+    assert find_synonym_pairs(
+        names, matrix, nb, tau=0.9, theta=0.1,
+        type_of=type_of, require_same_type=True,
+    ) == []
+
+
+def test_require_same_type_keeps_same_type():
+    names = ["Alpha", "Beta"]
+    matrix = np.array([[1, 0, 0], [0.99, 0, 0]], dtype=np.float32)
+    nb = {"Alpha": {"x", "y"}, "Beta": {"x", "y"}}
+    type_of = {"Alpha": "method", "Beta": "method"}
+    assert find_synonym_pairs(
+        names, matrix, nb, tau=0.9, theta=0.1,
+        type_of=type_of, require_same_type=True,
+    ) != []
+
+
+# ---- 精度守卫 B：名字必须沾边 ----
+
+def test_acronym_of():
+    assert _acronym_of("SEC", "Securities and Exchange Commission")
+    assert _acronym_of("RAG", "Retrieval Augmented Generation")
+    assert not _acronym_of("CAT", "Securities and Exchange Commission")
+    assert not _acronym_of("S", "Securities")  # 太短(<2 字母)
+
+
+def test_name_match_accepts_true_synonym_forms():
+    assert _names_name_match("Hybrid Retrieval", "Hybrid Retrieval Mechanism")  # 包含
+    assert _names_name_match("SEC", "Securities and Exchange Commission")        # 缩写
+    assert _names_name_match("Rating", "Ratings")                                # 单复数
+    assert _names_name_match("color", "colour")                                  # 拼写变体
+    assert _names_name_match("LightRAG", "Light RAG")                            # 字符高相似
+
+
+def test_name_match_rejects_different_qualifier():
+    # 换词的不同概念：共享一个词但既不包含也不缩写也不高相似 -> 拒
+    assert not _names_name_match("Net income", "Operating income")
+    assert not _names_name_match("training loss", "validation loss")
+
+
+def test_require_name_match_rejects_desc_similar_unrelated():
+    # 名字不沾边但 cos+jaccard 高（描述样板相似）-> name_match 应拒
+    names = ["Net income", "Operating income"]
+    matrix = np.array([[1, 0, 0], [0.99, 0, 0]], dtype=np.float32)
+    nb = {"Net income": {"x", "y"}, "Operating income": {"x", "y"}}
+    # 不开守卫：会连（共享 income，默认不查名字）
+    assert find_synonym_pairs(names, matrix, nb, tau=0.9, theta=0.1) != []
+    # 开 name_match：被拒
+    assert find_synonym_pairs(
+        names, matrix, nb, tau=0.9, theta=0.1, require_name_match=True,
+    ) == []
+
+
+def test_require_name_match_keeps_containment():
+    names = ["Hybrid Retrieval", "Hybrid Retrieval Mechanism"]
+    matrix = np.array([[1, 0, 0], [0.99, 0, 0]], dtype=np.float32)
+    nb = {"Hybrid Retrieval": {"x", "y"}, "Hybrid Retrieval Mechanism": {"x", "y"}}
+    pairs = find_synonym_pairs(
+        names, matrix, nb, tau=0.9, theta=0.1, require_name_match=True,
+    )
+    assert len(pairs) == 1
