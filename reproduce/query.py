@@ -7,11 +7,17 @@
 查询期开关（默认全关 = 原版 baseline，逐个打开做消融）：
   ENABLE_VLM              : 每题都让 VLM 看检索到的图（全开，贵且对纯文本题加噪）
   ENABLE_MODALITY_VLM     : 只对"问图/表"的题开 VLM（关键词检测，零成本，精准投放）
+  ENABLE_AUTO_VLM         : 关键词 ∪ 证据侧路由——关键词没命中时再看检索上下文里
+                            有没有图片证据，有才开 VLM（治"题面不提图、答案在图里"
+                            的盲区；阈值 AUTO_VLM_MIN_IMAGES，默认 1）
   ENABLE_DOC_META         : meta 题注入程序化统计量（页数/词数/高频词/缩写，见 doc_meta.py）
   ENABLE_RERANK           : DashScope gte-rerank 重排检索结果
+  RERANK_VISUAL_GUARD     : 重排视觉保位——问图/表的题保证截断后至少留
+                            RERANK_GUARD_SLOTS(默认2) 个视觉/表格块（治 rerank 丢表题）
   ENABLE_RETRIEVAL_REFLECT: R2 检索后充分性自检，不够则补检索（只补证据、绝不改答案）
   SAVE_CONTEXT            : 把检索上下文一并存进结果，供 diag_recall.py 离线体检
 模型/温度等共用配置见 common.py（LLM_TEMPERATURE 默认 0 = 可复现）。
+模态路由/保位的纯逻辑在 modality.py（可单测）。
 """
 
 import asyncio
@@ -29,6 +35,7 @@ load_dotenv(dotenv_path=".env", override=False)
 
 from common import build_arg_parser, build_model_funcs, configure_logging, env_on  # noqa: E402
 from doc_meta import compute_doc_stats, detect_meta_intent, format_stats_note  # noqa: E402
+from modality import count_image_evidence, detect_visual_intent, guard_rerank_results  # noqa: E402
 from lightrag import LightRAG  # noqa: E402
 from lightrag.utils import logger  # noqa: E402
 from raganything import RAGAnything, RAGAnythingConfig  # noqa: E402
@@ -78,32 +85,7 @@ async def retrieval_sufficiency_check(llm_func, question, context, max_context_c
 
 
 # ---------------------------------------------------------------------------
-# 模态意图检测（纯关键词，零 LLM 成本）。
-# 用途：把 VLM 只用在真正需要看图/表的题上——既正面打 DocBench 的多模态题，
-# 又避免对纯文本题开 VLM 带来的成本与噪声（VLM 看错图会自信答错）。
-# ---------------------------------------------------------------------------
-
-_VISUAL_KWS = (
-    "figure", "fig.", "fig ", "chart", "plot", "image", "photo", "picture",
-    "diagram", "graph", "panel", "axis", "legend", "curve", "shown in",
-    "图", "图表", "图中", "如图", "曲线", "示意", "照片", "插图",
-)
-_TABLE_KWS = (
-    "table", "row", "column", "cell", "spreadsheet",
-    "表", "表格", "表中", "单元格", "列", "行",
-)
-
-
-def detect_visual_intent(question: str):
-    """纯关键词判断问题是否需要看图/表。返回 (wants_visual, wants_table)。"""
-    q = (question or "").lower()
-    wants_table = any(k in q for k in _TABLE_KWS)
-    wants_visual = any(k in q for k in _VISUAL_KWS)
-    return wants_visual, wants_table
-
-
-# ---------------------------------------------------------------------------
-# 主流程
+# 主流程（模态意图/证据检测已抽到 modality.py，可单测）
 # ---------------------------------------------------------------------------
 
 def _load_queries(file_path: str):
@@ -146,16 +128,36 @@ async def process_with_rag(
         )
 
         # Reranker：默认关（= baseline）。开启用 DashScope gte-rerank（百炼 key 复用）。
+        # RERANK_VISUAL_GUARD：实测 rerank 在表格题上持续 -2~3 题（视觉/表格块的文字
+        # 形态打分吃亏被挤出截断线）。守卫=问图/表的题保证截断后至少留 K 个视觉块；
+        # 纯文本题不受影响。逻辑在 modality.guard_rerank_results（纯函数）。
         rerank_model_func = None
         if env_on("ENABLE_RERANK"):
             from lightrag.rerank import ali_rerank
 
-            rerank_model_func = partial(
+            base_rerank = partial(
                 ali_rerank,
                 model=os.getenv("RERANK_MODEL", "gte-rerank-v2"),
                 api_key=os.getenv("RERANK_BINDING_API_KEY") or api_key,
             )
-            logger.info("Reranker ENABLED: ali_rerank / gte-rerank-v2")
+            if env_on("RERANK_VISUAL_GUARD"):
+                guard_slots = int(os.getenv("RERANK_GUARD_SLOTS", "2"))
+
+                async def rerank_model_func(query, documents, top_n=None, **kw):
+                    # 全量打分（不让 API 截断），守卫后自己截断到 top_n
+                    scored = await base_rerank(
+                        query=query, documents=documents, top_n=None, **kw
+                    )
+                    return guard_rerank_results(
+                        scored, documents, query, top_n, min_visual=guard_slots
+                    )
+
+                logger.info(
+                    "Reranker ENABLED: ali_rerank + visual guard (slots=%d)", guard_slots
+                )
+            else:
+                rerank_model_func = base_rerank
+                logger.info("Reranker ENABLED: ali_rerank / gte-rerank-v2")
 
         lightrag = LightRAG(
             working_dir=working_dir,
@@ -181,6 +183,8 @@ async def process_with_rag(
         # ---- 查询期开关（默认全关 = baseline）----
         vlm_on = env_on("ENABLE_VLM")                      # 每题全开 VLM
         modality_vlm_on = env_on("ENABLE_MODALITY_VLM")    # 仅图/表意图题开 VLM
+        auto_vlm_on = env_on("ENABLE_AUTO_VLM")            # 关键词 ∪ 证据侧路由
+        auto_vlm_min = int(os.getenv("AUTO_VLM_MIN_IMAGES", "1"))
         save_ctx = env_on("SAVE_CONTEXT")                  # 存检索上下文供体检
         rr_on = env_on("ENABLE_RETRIEVAL_REFLECT")         # R2 补检索
         rr_top_k = int(os.getenv("RR_TOP_K", "80"))            # 默认 2×（top_k=40）
@@ -202,9 +206,11 @@ async def process_with_rag(
         for query in queries:
             q = query["question"]
 
-            # 本题是否开 VLM：全开 > 模态感知（关键词，零成本）> 关
+            # 本题是否开 VLM：全开 > 关键词（问题侧，零成本）> 证据侧（AUTO_VLM，
+            # 关键词没命中时再看检索上下文里有没有图片证据，见下方触发点）
             kw_visual, kw_table = detect_visual_intent(q)
-            q_vlm = vlm_on or (modality_vlm_on and (kw_visual or kw_table))
+            q_vlm = vlm_on or ((modality_vlm_on or auto_vlm_on) and (kw_visual or kw_table))
+            vlm_trigger = "all" if vlm_on else ("keyword" if q_vlm else "")
 
             # 送给模型的问题（meta 题附加统计量；结果里的 question 保持原文供评测匹配）。
             # 问图/表的题跳过注入：首轮实测发现表格题（题干常带 "on page N"）被注入后
@@ -224,6 +230,11 @@ async def process_with_rag(
                     retrieved_context = await rag.aquery(
                         q, mode="mix", only_need_context=True, vlm_enhanced=False
                     )
+                    # 证据侧触发（R2 路径顺带零成本：上下文反正已取）
+                    if (auto_vlm_on and not q_vlm
+                            and count_image_evidence(retrieved_context) >= auto_vlm_min):
+                        q_vlm = True
+                        vlm_trigger = "evidence"
                     rr_verdict, need_more, want_visual = await retrieval_sufficiency_check(
                         llm_model_func, q, retrieved_context
                     )
@@ -252,24 +263,30 @@ async def process_with_rag(
                         q_llm, mode="mix", response_type="One Sentence", vlm_enhanced=q_vlm
                     )
             else:
-                result = await rag.aquery(
-                    q_llm, mode="mix", response_type="One Sentence", vlm_enhanced=q_vlm
-                )
-                if save_ctx:
+                # 证据侧触发需要先取一次检索上下文（SAVE_CONTEXT 也要，二者共用一次）
+                if save_ctx or (auto_vlm_on and not q_vlm):
                     try:
                         retrieved_context = await rag.aquery(
                             q, mode="mix", only_need_context=True, vlm_enhanced=False
                         )
                     except Exception as e:
-                        logger.warning(f"Save context failed: {e}")
+                        logger.warning(f"Context fetch failed: {e}")
+                if (auto_vlm_on and not q_vlm and retrieved_context
+                        and count_image_evidence(retrieved_context) >= auto_vlm_min):
+                    q_vlm = True
+                    vlm_trigger = "evidence"
+                result = await rag.aquery(
+                    q_llm, mode="mix", response_type="One Sentence", vlm_enhanced=q_vlm
+                )
 
             rec = {
                 "question": q,
                 "answer": result,
                 "correct_answer": query["answer"],
             }
-            if modality_vlm_on:
-                rec["vlm_used"] = q_vlm     # 便于离线分析哪些题触发了 VLM
+            if modality_vlm_on or auto_vlm_on or vlm_on:
+                rec["vlm_used"] = q_vlm          # 便于离线分析哪些题触发了 VLM
+                rec["vlm_trigger"] = vlm_trigger  # all / keyword / evidence / ""
             if doc_stats is not None:
                 rec["doc_meta_used"] = meta_used
             if rr_on:

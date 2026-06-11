@@ -73,7 +73,7 @@ def load_flags(qa_dir, doc_map, method, doc_id, q_normed):
                 if norm(rec.get("question")) == q_normed:
                     return {
                         k: rec[k]
-                        for k in ("doc_meta_used", "vlm_used", "rr_triggered")
+                        for k in ("doc_meta_used", "vlm_used", "vlm_trigger", "rr_triggered")
                         if k in rec
                     }
     except Exception:
