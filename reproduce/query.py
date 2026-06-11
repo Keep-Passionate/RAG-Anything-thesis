@@ -1,40 +1,37 @@
 #!/usr/bin/env python
-"""
-Example script demonstrating the integration of MinerU parser with RAGAnything
+"""DocBench 查询脚本：读 <id>_qa.jsonl 逐题作答，结果存 RESULT_NAME 指定的 JSON。
 
-This example shows how to:
-1. Process documents with RAGAnything using MinerU parser
-2. Perform pure text queries using aquery() method
-3. Perform multimodal queries with specific multimodal content using aquery_with_multimodal() method
-4. Handle different types of multimodal content (tables, equations) in queries
+用法：python reproduce/query.py <pdf> --working_dir <该篇文档自己的索引目录>
+（索引必须已由 index.py 建好；本脚本只做查询，不烧建图的钱。）
+
+查询期开关（默认全关 = 原版 baseline，逐个打开做消融）：
+  ENABLE_VLM              : 每题都让 VLM 看检索到的图（全开，贵且对纯文本题加噪）
+  ENABLE_MODALITY_VLM     : 只对"问图/表"的题开 VLM（关键词检测，零成本，精准投放）
+  ENABLE_DOC_META         : meta 题注入程序化统计量（页数/词数/高频词/缩写，见 doc_meta.py）
+  ENABLE_RERANK           : DashScope gte-rerank 重排检索结果
+  ENABLE_RETRIEVAL_REFLECT: R2 检索后充分性自检，不够则补检索（只补证据、绝不改答案）
+  SAVE_CONTEXT            : 把检索上下文一并存进结果，供 diag_recall.py 离线体检
+模型/温度等共用配置见 common.py（LLM_TEMPERATURE 默认 0 = 可复现）。
 """
 
-import os
-import argparse
 import asyncio
-import logging
-import logging.config
-from pathlib import Path
-from lightrag import LightRAG
-
-# Add project root directory to Python path
+import json
+import os
 import sys
+from functools import partial
+from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
-
-from lightrag.llm.openai import openai_complete_if_cache, openai_embed
-from lightrag.utils import EmbeddingFunc, logger, set_verbose_debug
-from raganything import RAGAnything, RAGAnythingConfig
 
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=".env", override=False)
 
-
-def _env_on(name: str, default: str = "false") -> bool:
-    """读布尔开关环境变量：1/true/yes/on（不分大小写）为真。统一各功能开关的解析。"""
-    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
-
+from common import build_arg_parser, build_model_funcs, configure_logging, env_on  # noqa: E402
+from doc_meta import compute_doc_stats, detect_meta_intent, format_stats_note  # noqa: E402
+from lightrag import LightRAG  # noqa: E402
+from lightrag.utils import logger  # noqa: E402
+from raganything import RAGAnything, RAGAnythingConfig  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # R2：检索后充分性自检 + 触发补检索（唯一保留的反思机制）。只判"检索够不够答"，
@@ -42,7 +39,6 @@ def _env_on(name: str, default: str = "false") -> bool:
 # 因此下行有底，不会把对的改坏。
 # （已删除答案重写式自反思：方案A 实测暴跌-29，方案C answer-conditioned 易自我
 #  强化错误，均无正向收益；负向发现已存结果 JSON 与论文，代码不再保留。）
-# 由环境变量 ENABLE_RETRIEVAL_REFLECT 开关控制（默认关 = 原版行为）。
 # ---------------------------------------------------------------------------
 
 RETRIEVAL_SUFFICIENCY_PROMPT = """You are judging ONLY whether the retrieved context already contains the facts needed to answer the question. Do NOT answer the question.
@@ -66,7 +62,7 @@ async def retrieval_sufficiency_check(llm_func, question, context, max_context_c
 
     返回 (verdict, need_more, want_visual)：
       - need_more  : 是否需要补检索（verdict 以 INSUFFICIENT 开头）
-      - want_visual: 缺的信息是否疑似在图/表里（仅作记录；本 MVP 触发时统一开 VLM）
+      - want_visual: 缺的信息是否疑似在图/表里（触发补检索时决定要不要开 VLM）
     """
     ctx = (context or "")[:max_context_chars]
     verdict = (
@@ -83,11 +79,8 @@ async def retrieval_sufficiency_check(llm_func, question, context, max_context_c
 
 # ---------------------------------------------------------------------------
 # 模态意图检测（纯关键词，零 LLM 成本）。
-# 用途：把 VLM 只用在真正需要看图/表的题上 —— 既正面打 DocBench 的多模态题
-# （baseline 最弱项、论文 A.5 头号失败模式 "text-centric retrieval bias"），
+# 用途：把 VLM 只用在真正需要看图/表的题上——既正面打 DocBench 的多模态题，
 # 又避免对纯文本题开 VLM 带来的成本与噪声（VLM 看错图会自信答错）。
-# 与 R2 互补：R2 用一次 LLM 判"够不够答"（贵、可能误判无解题）；本检测是免费的
-# 先验信号，可单独驱动 VLM（ENABLE_MODALITY_VLM），也喂给 R2 兜底其漏判。
 # ---------------------------------------------------------------------------
 
 _VISUAL_KWS = (
@@ -102,67 +95,31 @@ _TABLE_KWS = (
 
 
 def detect_visual_intent(question: str):
-    """纯关键词判断问题是否需要看图/表。返回 (wants_visual, wants_table)。零 LLM 成本。"""
+    """纯关键词判断问题是否需要看图/表。返回 (wants_visual, wants_table)。"""
     q = (question or "").lower()
     wants_table = any(k in q for k in _TABLE_KWS)
     wants_visual = any(k in q for k in _VISUAL_KWS)
     return wants_visual, wants_table
 
 
-def configure_logging():
-    """Configure logging for the application"""
-    # Get log directory path from environment variable or use current directory
-    log_dir = os.getenv("LOG_DIR", os.getcwd())
-    log_file_path = os.path.abspath(os.path.join(log_dir, "raganything_example_qa.log"))
+# ---------------------------------------------------------------------------
+# 主流程
+# ---------------------------------------------------------------------------
 
-    print(f"\nRAGAnything example log file: {log_file_path}\n")
-    os.makedirs(os.path.dirname(log_dir), exist_ok=True)
-
-    # Get log file max size and backup count from environment variables
-    log_max_bytes = int(os.getenv("LOG_MAX_BYTES", 10485760))  # Default 10MB
-    log_backup_count = int(os.getenv("LOG_BACKUP_COUNT", 5))  # Default 5 backups
-
-    logging.config.dictConfig(
-        {
-            "version": 1,
-            "disable_existing_loggers": False,
-            "formatters": {
-                "default": {
-                    "format": "%(levelname)s: %(message)s",
-                },
-                "detailed": {
-                    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-                },
-            },
-            "handlers": {
-                "console": {
-                    "formatter": "default",
-                    "class": "logging.StreamHandler",
-                    "stream": "ext://sys.stderr",
-                },
-                "file": {
-                    "formatter": "detailed",
-                    "class": "logging.handlers.RotatingFileHandler",
-                    "filename": log_file_path,
-                    "maxBytes": log_max_bytes,
-                    "backupCount": log_backup_count,
-                    "encoding": "utf-8",
-                },
-            },
-            "loggers": {
-                "lightrag": {
-                    "handlers": ["console", "file"],
-                    "level": "INFO",
-                    "propagate": False,
-                },
-            },
-        }
-    )
-
-    # Set the logger level to INFO
-    logger.setLevel(logging.INFO)
-    # Enable verbose debug if needed
-    set_verbose_debug(os.getenv("VERBOSE", "false").lower() == "true")
+def _load_queries(file_path: str):
+    """读取与 PDF 同目录的 <id>_qa.jsonl。返回 [{question, answer}]；缺文件返回 []。"""
+    folder = os.path.dirname(file_path)
+    qa_path = os.path.join(folder, f"{os.path.basename(folder)}_qa.jsonl")
+    if not os.path.exists(qa_path):
+        logger.warning(f"QA file not found: {qa_path}")
+        return []
+    queries = []
+    with open(qa_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                d = json.loads(line)
+                queries.append({"question": d["question"], "answer": d.get("answer", "")})
+    return queries
 
 
 async def process_with_rag(
@@ -173,118 +130,24 @@ async def process_with_rag(
     working_dir: str = None,
     parser: str = None,
 ):
-    """
-    Process document with RAGAnything
-
-    Args:
-        file_path: Path to the document
-        output_dir: Output directory for RAG results
-        api_key: OpenAI API key
-        base_url: Optional base URL for API
-        working_dir: Working directory for RAG storage
-    """
+    """对已建好索引的文档逐题作答并保存结果。"""
     try:
-        # Create RAGAnything configuration
         config = RAGAnythingConfig(
             working_dir=working_dir or "./rag_storage",
-            parser=parser,  # Parser selection: mineru or docling
-            parse_method="auto",  # Parse method: auto, ocr, or txt
+            parser=parser,
+            parse_method="auto",
             enable_image_processing=True,
             enable_table_processing=True,
             enable_equation_processing=True,
         )
 
-        # Define LLM model function
-        # 模型名从环境变量读取：默认 gpt（原版行为），设 LLM_MODEL=qwen-plus 即用百炼 Qwen
-        # 温度默认 0（贪心解码）：让答案对同一输入【确定可复现】，否则同一题每次跑结果不同，
-        # 在小评测集上会把"真实涨点"淹没在随机抖动里、根本看不出来。可用 LLM_TEMPERATURE 改。
-        def llm_model_func(prompt, system_prompt=None, history_messages=[], **kwargs):
-            kwargs.setdefault("temperature", float(os.getenv("LLM_TEMPERATURE", "0")))
-            return openai_complete_if_cache(
-                os.getenv("LLM_MODEL", "gpt-4o-mini"),
-                prompt,
-                system_prompt=system_prompt,
-                history_messages=history_messages,
-                api_key=api_key,
-                base_url=base_url,
-                **kwargs,
-            )
-
-        # Define vision model function for image processing
-        def vision_model_func(
-            prompt,
-            system_prompt=None,
-            history_messages=[],
-            image_data=None,
-            messages=None,
-            **kwargs,
-        ):
-            # 同样固定温度（看图作答也要可复现）
-            kwargs.setdefault("temperature", float(os.getenv("LLM_TEMPERATURE", "0")))
-            # If messages format is provided (for multimodal VLM enhanced query), use it directly
-            if messages:
-                return openai_complete_if_cache(
-                    os.getenv("VISION_MODEL", "gpt-4o-mini"),
-                    "",
-                    system_prompt=None,
-                    history_messages=[],
-                    messages=messages,
-                    api_key=api_key,
-                    base_url=base_url,
-                    **kwargs,
-                )
-            # Traditional single image format
-            elif image_data:
-                return openai_complete_if_cache(
-                    os.getenv("VISION_MODEL", "gpt-4o-mini"),
-                    "",
-                    system_prompt=None,
-                    history_messages=[],
-                    messages=[
-                        {"role": "system", "content": system_prompt}
-                        if system_prompt
-                        else None,
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{image_data}"
-                                    },
-                                },
-                            ],
-                        }
-                        if image_data
-                        else {"role": "user", "content": prompt},
-                    ],
-                    api_key=api_key,
-                    base_url=base_url,
-                    **kwargs,
-                )
-            # Pure text format
-            else:
-                return llm_model_func(prompt, system_prompt, history_messages, **kwargs)
-
-        # Define embedding function
-        embedding_func = EmbeddingFunc(
-            embedding_dim=int(os.getenv("EMBEDDING_DIM", "3072")),
-            max_token_size=8192,
-            func=lambda texts: openai_embed.func(
-                texts,
-                model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-large"),
-                api_key=api_key,
-                base_url=base_url,
-            ),
+        llm_model_func, vision_model_func, embedding_func = build_model_funcs(
+            api_key, base_url
         )
-        # Reranker：默认关（=原版 baseline 行为，所有历史条件一致）。
-        # 设 ENABLE_RERANK=true 时启用 DashScope 百炼 gte-rerank（ali_rerank，端点内置），
-        # 用现有百炼 key（RERANK_BINDING_API_KEY 缺省回退到 LLM 的 api_key）。
-        from functools import partial
 
+        # Reranker：默认关（= baseline）。开启用 DashScope gte-rerank（百炼 key 复用）。
         rerank_model_func = None
-        if _env_on("ENABLE_RERANK"):
+        if env_on("ENABLE_RERANK"):
             from lightrag.rerank import ali_rerank
 
             rerank_model_func = partial(
@@ -303,7 +166,6 @@ async def process_with_rag(
         )
         await lightrag.initialize_storages()
 
-        # Initialize RAGAnything with new dataclass structure
         rag = RAGAnything(
             config=config,
             lightrag=lightrag,
@@ -312,47 +174,45 @@ async def process_with_rag(
             embedding_func=embedding_func,
         )
 
-        import json
-
-        folder_name = os.path.basename(os.path.dirname(file_path))
-        qa_file_path = os.path.join(
-            os.path.dirname(file_path), f"{folder_name}_qa.jsonl"
-        )
-        queries = []
-        if os.path.exists(qa_file_path):
-            with open(qa_file_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        qa_data = json.loads(line)
-                        queries.append(
-                            {
-                                "question": qa_data["question"],
-                                "answer": qa_data.get("answer", ""),
-                            }
-                        )
-        else:
-            logger.warning(f"QA file not found: {qa_file_path}")
+        queries = _load_queries(file_path)
+        if not queries:
             return
 
-        # VLM 增强：默认关（=原版 baseline）。设 ENABLE_VLM=true 时，对【每一题】都把
-        # 检索到的图片交给 qwen-vl-max 看图作答（全开，贵且对纯文本题加噪）。
-        vlm_on = _env_on("ENABLE_VLM")
-        # 模态感知 VLM（默认关）：只对"有图/表意图"的题开 VLM（关键词检测，零额外成本），
-        # 精准打多模态题、纯文本题不受扰。是 ENABLE_VLM 全开之外更省更稳的折中。
-        modality_vlm_on = _env_on("ENABLE_MODALITY_VLM")
-        # 体检（SAVE_CONTEXT）：把每题"检索到的上下文"也存进结果，供离线脚本
-        # diag_recall.py 算证据命中率（recall 代理）。默认关，不影响历史实验。
-        save_ctx = _env_on("SAVE_CONTEXT")
-        # R2（ENABLE_RETRIEVAL_REFLECT）：检索后自反思 + 触发补检索。默认关。
-        # 流程：取上下文 → 自检够不够答 → 不够就用更大的 top_k 重检，且仅当缺的是
-        # 视觉(图/表)信息时才开 VLM 看图 → 再答一次；够就正常答。只补证据、不改答案。
-        rr_on = _env_on("ENABLE_RETRIEVAL_REFLECT")
-        rr_top_k = int(os.getenv("RR_TOP_K", "80"))             # 默认 2×（LightRAG 默认 top_k=40）
-        rr_chunk_top_k = int(os.getenv("RR_CHUNK_TOP_K", "40"))  # 默认 2×（默认 chunk_top_k=20）
+        # ---- 查询期开关（默认全关 = baseline）----
+        vlm_on = env_on("ENABLE_VLM")                      # 每题全开 VLM
+        modality_vlm_on = env_on("ENABLE_MODALITY_VLM")    # 仅图/表意图题开 VLM
+        save_ctx = env_on("SAVE_CONTEXT")                  # 存检索上下文供体检
+        rr_on = env_on("ENABLE_RETRIEVAL_REFLECT")         # R2 补检索
+        rr_top_k = int(os.getenv("RR_TOP_K", "80"))            # 默认 2×（top_k=40）
+        rr_chunk_top_k = int(os.getenv("RR_CHUNK_TOP_K", "40"))  # 默认 2×（chunk_top_k=20）
+
+        # 文档统计量（ENABLE_DOC_META）：整篇只算一次，meta 题注入"已验证统计量"。
+        doc_stats = None
+        if env_on("ENABLE_DOC_META"):
+            doc_stats = compute_doc_stats(file_path)
+            if doc_stats:
+                logger.info(
+                    "Doc meta ENABLED: pages=%s words~%s",
+                    doc_stats["pages"], doc_stats["words"],
+                )
+            else:
+                logger.warning("ENABLE_DOC_META: failed to read PDF stats, notes disabled")
 
         results = []
         for query in queries:
             q = query["question"]
+
+            # 送给模型的问题（meta 题附加统计量；结果里的 question 保持原文供评测匹配）
+            q_llm = q
+            meta_used = False
+            if doc_stats and detect_meta_intent(q):
+                q_llm = f"{q}\n\n{format_stats_note(doc_stats)}"
+                meta_used = True
+
+            # 本题是否开 VLM：全开 > 模态感知（关键词，零成本）> 关
+            kw_visual, kw_table = detect_visual_intent(q)
+            q_vlm = vlm_on or (modality_vlm_on and (kw_visual or kw_table))
+
             retrieved_context = None
             rr_triggered = False
             rr_verdict = ""
@@ -366,14 +226,13 @@ async def process_with_rag(
                         llm_model_func, q, retrieved_context
                     )
                     # 关键词先验兜底 LLM 漏判：问题明说图/表就当需要视觉
-                    kw_visual, kw_table = detect_visual_intent(q)
                     want_visual = want_visual or kw_visual or kw_table
                     if need_more:
                         rr_triggered = True
                         # 补检索：加大检索面捞回被挤掉的块；仅当缺的是视觉信息才开 VLM。
                         # 除 top_k / VLM 外，prompt 与正常分支保持一致，便于干净消融。
                         result = await rag.aquery(
-                            q,
+                            q_llm,
                             mode="mix",
                             response_type="One Sentence",
                             vlm_enhanced=want_visual,
@@ -382,23 +241,17 @@ async def process_with_rag(
                         )
                     else:
                         result = await rag.aquery(
-                            q, mode="mix", response_type="One Sentence",
-                            vlm_enhanced=vlm_on,
+                            q_llm, mode="mix", response_type="One Sentence",
+                            vlm_enhanced=q_vlm,
                         )
                 except Exception as e:
                     logger.warning(f"Retrieval-reflect failed, fallback to normal: {e}")
                     result = await rag.aquery(
-                        q, mode="mix", response_type="One Sentence", vlm_enhanced=vlm_on
+                        q_llm, mode="mix", response_type="One Sentence", vlm_enhanced=q_vlm
                     )
             else:
-                # 模态感知：纯文本题用文本作答，有图/表意图的题才开 VLM（零成本检测）。
-                # ENABLE_VLM=true 时全开，优先级最高。
-                q_vlm = vlm_on
-                if modality_vlm_on and not vlm_on:
-                    kw_visual, kw_table = detect_visual_intent(q)
-                    q_vlm = kw_visual or kw_table
                 result = await rag.aquery(
-                    q, mode="mix", response_type="One Sentence", vlm_enhanced=q_vlm
+                    q_llm, mode="mix", response_type="One Sentence", vlm_enhanced=q_vlm
                 )
                 if save_ctx:
                     try:
@@ -413,8 +266,10 @@ async def process_with_rag(
                 "answer": result,
                 "correct_answer": query["answer"],
             }
-            if modality_vlm_on and not rr_on:
-                rec["vlm_used"] = q_vlm  # 便于离线分析哪些题触发了 VLM
+            if modality_vlm_on:
+                rec["vlm_used"] = q_vlm     # 便于离线分析哪些题触发了 VLM
+            if doc_stats is not None:
+                rec["doc_meta_used"] = meta_used
             if rr_on:
                 rec["rr_triggered"] = rr_triggered
                 rec["rr_verdict"] = rr_verdict
@@ -439,44 +294,16 @@ async def process_with_rag(
 
 
 def main():
-    """Main function to run the example"""
-    parser = argparse.ArgumentParser(description="MinerU RAG Example")
-    parser.add_argument("file_path", help="Path to the document to process")
-    parser.add_argument(
-        "--working_dir", "-w", default="./rag_storage", help="Working directory path"
-    )
-    parser.add_argument(
-        "--output", "-o", default="./output", help="Output directory path"
-    )
-    parser.add_argument(
-        "--api-key",
-        default=os.getenv("LLM_BINDING_API_KEY"),
-        help="OpenAI API key (defaults to LLM_BINDING_API_KEY env var)",
-    )
-    parser.add_argument(
-        "--base-url",
-        default=os.getenv("LLM_BINDING_HOST"),
-        help="Optional base URL for API",
-    )
-    parser.add_argument(
-        "--parser",
-        default=os.getenv("PARSER", "mineru"),
-        help="Optional base URL for API",
-    )
+    args = build_arg_parser("DocBench QA runner (query only, no indexing)").parse_args()
 
-    args = parser.parse_args()
-
-    # Check if API key is provided
     if not args.api_key:
-        logger.error("Error: OpenAI API key is required")
-        logger.error("Set api key environment variable or use --api-key option")
+        logger.error("Error: API key is required")
+        logger.error("Set LLM_BINDING_API_KEY env var or use --api-key option")
         return
 
-    # Create output directory if specified
     if args.output:
         os.makedirs(args.output, exist_ok=True)
 
-    # Process with RAG
     asyncio.run(
         process_with_rag(
             args.file_path,
@@ -490,8 +317,7 @@ def main():
 
 
 if __name__ == "__main__":
-    # Configure logging first
-    configure_logging()
+    configure_logging("raganything_example_qa.log")
 
     print("RAGAnything Example")
     print("=" * 30)
