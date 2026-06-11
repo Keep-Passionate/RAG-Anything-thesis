@@ -34,7 +34,14 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=".env", override=False)
 
 from common import build_arg_parser, build_model_funcs, configure_logging, env_on  # noqa: E402
-from doc_meta import compute_doc_stats, detect_meta_intent, format_stats_note  # noqa: E402
+from doc_meta import (  # noqa: E402
+    compute_doc_stats,
+    detect_count_intent,
+    detect_meta_intent,
+    extract_page_text,
+    find_page_reference,
+    format_stats_note,
+)
 from modality import count_image_evidence, detect_visual_intent, guard_rerank_results  # noqa: E402
 from lightrag import LightRAG  # noqa: E402
 from lightrag.utils import logger  # noqa: E402
@@ -213,12 +220,26 @@ async def process_with_rag(
             vlm_trigger = "all" if vlm_on else ("keyword" if q_vlm else "")
 
             # 送给模型的问题（meta 题附加统计量；结果里的 question 保持原文供评测匹配）。
-            # 问图/表的题跳过注入：首轮实测发现表格题（题干常带 "on page N"）被注入后
-            # 轻微掉分（mm-t 85%→81%），而统计量对这类题本无帮助——避让即可两全。
+            # 避让规则（v2）：问图/表的题跳过注入——首轮实测表格题被注入后轻微掉分。
+            # 计数题覆盖（v3）："how many figures/tables" 含图表词但恰是统计量能精确
+            # 回答的，强制注入。页码引用（v3）：题面点名 "page N" 时把该页开头文本
+            # 一并给模型——"第 N 页讲什么"从猜变成读；N 越界则只有 total pages 兜底。
             q_llm = q
             meta_used = False
-            if doc_stats and detect_meta_intent(q) and not (kw_visual or kw_table):
-                q_llm = f"{q}\n\n{format_stats_note(doc_stats)}"
+            if doc_stats and (
+                detect_count_intent(q)
+                or (detect_meta_intent(q) and not (kw_visual or kw_table))
+            ):
+                note = format_stats_note(doc_stats)
+                page_no = find_page_reference(q)
+                if page_no:
+                    snippet = extract_page_text(file_path, page_no)
+                    if snippet:
+                        note += (
+                            f"\n[Beginning of page {page_no}, extracted "
+                            f"programmatically: {snippet}]"
+                        )
+                q_llm = f"{q}\n\n{note}"
                 meta_used = True
 
             retrieved_context = None

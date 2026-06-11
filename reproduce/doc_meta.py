@@ -22,8 +22,11 @@
 首轮战绩（30篇/177题）：meta 题 37%→53%（+5题），机制完全对应（详见 memory）。
 """
 
+import json
+import os
 import re
 from collections import Counter
+from pathlib import Path
 
 # 命中任一关键词即认为是"文档统计量"题。"page" 故意放宽（带页码的题总页数都有用，
 # 比如 "summary of page 20" 在 12 页文档上应答"不存在第 20 页"）。
@@ -56,6 +59,34 @@ def detect_meta_intent(question: str) -> bool:
     return any(k in q for k in _META_KWS)
 
 
+# v3：计数题（"how many figures/tables..."）。这类题含 figure/table 关键词，会被
+# query.py 的"避让图/表题"门拦下，但它们恰恰是统计量能精确回答的——所以单独识别、
+# 在 query.py 里覆盖避让门（归因实锤：'how many figures excluding appendix' 曾因此丢分）。
+_COUNT_RE = re.compile(
+    r"how\s+many\s+(?:figures?|images?|tables?|equations?|charts?|pictures?|illustrations?)",
+    re.IGNORECASE,
+)
+_COUNT_KWS_ZH = ("几张图", "多少张图", "几幅图", "几个表", "多少个表", "几个公式", "多少个公式")
+
+
+def detect_count_intent(question: str) -> bool:
+    """问题是否在数"文档里有几张图/几个表/几个公式"。"""
+    q = question or ""
+    return bool(_COUNT_RE.search(q)) or any(k in q for k in _COUNT_KWS_ZH)
+
+
+# v3：页码引用（"summary of page 20" / "第 7 页"）。识别出具体页码后，
+# query.py 会把该页开头文本一并注入——把"第 N 页讲什么"从猜变成读。
+_PAGE_NUM_RE = re.compile(r"page\s+(\d{1,4})", re.IGNORECASE)
+_PAGE_NUM_ZH_RE = re.compile(r"第\s*(\d{1,4})\s*页")
+
+
+def find_page_reference(question: str):
+    """提取问题里引用的页码（1 起算）。没有具体页码返回 None。"""
+    m = _PAGE_NUM_RE.search(question or "") or _PAGE_NUM_ZH_RE.search(question or "")
+    return int(m.group(1)) if m else None
+
+
 def text_stats(text: str) -> dict:
     """从提取文本计算 词数 / 高频词 top3 / 高频缩写 top3（纯函数，可单测）。
 
@@ -83,7 +114,11 @@ def text_stats(text: str) -> dict:
 
 
 def compute_doc_stats(pdf_path: str):
-    """读 PDF 计算统计量。PyMuPDF 优先（MinerU 自带），pypdf 兜底；都失败返回 None。"""
+    """读 PDF 计算统计量。PyMuPDF 优先（MinerU 自带），pypdf 兜底；都失败返回 None。
+
+    v3：若能找到 MinerU 的解析产物 content_list（建索引时已生成），一并精确计数
+    图/表/公式元素（找不到则静默跳过，统计量退回 v2 行为）。
+    """
     try:
         import fitz  # PyMuPDF
 
@@ -101,7 +136,68 @@ def compute_doc_stats(pdf_path: str):
             return None
     stats = text_stats(text)
     stats["pages"] = pages
+    cl = locate_content_list(pdf_path)
+    if cl:
+        elements = count_elements(cl)
+        if elements:
+            stats.update(elements)
     return stats
+
+
+def locate_content_list(pdf_path: str):
+    """定位 MinerU 解析产物 <stem>_content_list.json（索引时生成在解析输出目录）。
+
+    依次尝试：PARSE_OUTPUT_DIR 环境变量（默认 ./output，与 index.py 的 --output
+    默认一致）下的标准路径，再做一次有界 glob。找不到返回 None（v3 计数静默关闭）。
+    """
+    stem = Path(pdf_path).stem
+    root = Path(os.getenv("PARSE_OUTPUT_DIR", "./output"))
+    for cand in (
+        root / stem / "auto" / f"{stem}_content_list.json",
+        root / stem / f"{stem}_content_list.json",
+    ):
+        if cand.exists():
+            return cand
+    if root.exists():
+        hits = list(root.glob(f"*/*/{stem}_content_list.json"))
+        if hits:
+            return hits[0]
+    return None
+
+
+def count_elements(content_list_path):
+    """从 MinerU content_list 精确计数图/表/公式元素。解析失败返回 None。"""
+    try:
+        with open(content_list_path, encoding="utf-8") as f:
+            items = json.load(f)
+        types = Counter(str(it.get("type", "")) for it in items if isinstance(it, dict))
+        return {
+            "figures": types.get("image", 0),
+            "tables": types.get("table", 0),
+            "equations": types.get("equation", 0),
+        }
+    except Exception:
+        return None
+
+
+def extract_page_text(pdf_path: str, page_no: int, max_chars: int = 1200) -> str:
+    """抽取第 page_no 页（1 起算）开头文本。页码越界/读取失败返回空串。
+
+    用途：问题点名"page N"时把该页内容直接给模型——"第 N 页讲什么"从猜变成读；
+    页码超出总页数时返回空串，模型只看到统计量里的 total pages，自然答"不存在"。
+    """
+    if not page_no or page_no < 1:
+        return ""
+    try:
+        import fitz
+
+        with fitz.open(pdf_path) as doc:
+            if page_no > doc.page_count:
+                return ""
+            text = doc[page_no - 1].get_text()
+        return " ".join(text.split())[:max_chars]
+    except Exception:
+        return ""
 
 
 def format_stats_note(stats: dict) -> str:
@@ -111,11 +207,20 @@ def format_stats_note(stats: dict) -> str:
     # 措辞刻意中性：首轮实测用了 "trust these numbers over any retrieved text"，
     # 导致部分非统计题（题干带 page 的表格题）被带偏、轻微掉分。统计量只做补充信息，
     # 不得贬低检索内容的可信度。
+    parts = [
+        f"total pages = {stats['pages']}",
+        f"approximate word count (from extracted text) = {stats['words']}",
+        f"most frequent words = {tw}",
+        f"most frequent abbreviations = {aw}",
+    ]
+    if "figures" in stats:  # v3：content_list 可用时的精确元素计数
+        parts.append(
+            f"parsed element counts (whole document, incl. appendix): "
+            f"figures = {stats['figures']}, tables = {stats['tables']}, "
+            f"equations = {stats['equations']}"
+        )
     return (
         "[Supplementary document statistics, computed programmatically from the PDF: "
-        f"total pages = {stats['pages']}; "
-        f"approximate word count (from extracted text) = {stats['words']}; "
-        f"most frequent words = {tw}; "
-        f"most frequent abbreviations = {aw}. "
-        "Use them only when the question asks about such document-level statistics.]"
+        + "; ".join(parts)
+        + ". Use them only when the question asks about such document-level statistics.]"
     )
