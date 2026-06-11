@@ -52,9 +52,19 @@ def load_types(qa_dir):
     return q2type
 
 
-def load_flags(qa_dir, method, doc_id, q_normed):
+def build_doc_map(qa_dir):
+    """doc_id -> 文件夹名。评测器的 doc_id 是 PDF 文件名（如 NYSE_ACN_2020.pdf），
+    而结果文件存在编号文件夹下（如 79/qa_results_*.json），这里建立映射。"""
+    m = {}
+    for p in Path(qa_dir).glob("*/*.pdf"):
+        m[p.name] = p.parent.name
+    return m
+
+
+def load_flags(qa_dir, doc_map, method, doc_id, q_normed):
     """读 qa_results_<method>.json 里这道题的机制标记（缺文件/缺字段返回空 dict）。"""
-    p = Path(qa_dir) / doc_id / f"qa_results_{method}.json"
+    folder = doc_map.get(doc_id, doc_id)  # 映射不到就按原样当文件夹名试
+    p = Path(qa_dir) / folder / f"qa_results_{method}.json"
     if not p.exists():
         return {}
     try:
@@ -81,6 +91,7 @@ def main():
 
     acc = load_eval(args.eval)
     q2type = load_types(args.qa_dir)
+    doc_map = build_doc_map(args.qa_dir)
     a_acc = {(d, q): v for (m, d, q), v in acc.items() if m == args.a}
     b_acc = {(d, q): v for (m, d, q), v in acc.items() if m == args.b}
     common = sorted(set(a_acc) & set(b_acc))
@@ -120,7 +131,7 @@ def main():
     for title, items in (("B 赢回的题", wins), ("B 搞砸的题", losses)):
         print(f"\n--- {title} ({len(items)}) ---")
         for d, q in items:
-            flags = load_flags(args.qa_dir, args.b, d, q)
+            flags = load_flags(args.qa_dir, doc_map, args.b, d, q)
             ftxt = " ".join(f"{k}={v}" for k, v in flags.items()) or "(无标记)"
             print(f"[doc {d}] ({q2type.get(q, '?')}) {ftxt}")
             print(f"    {q[:110]}")
