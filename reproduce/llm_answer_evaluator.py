@@ -328,7 +328,9 @@ Respond with a JSON object:
                             system_prompt="You are an expert evaluator. Provide accurate and fair evaluations based on the given criteria.",
                             api_key=self.config.api_key,
                             base_url=self.config.base_url,
-                            temperature=0.1,  # Keep temperature low for consistent evaluation.
+                            # 裁判温度默认 0：实测 0.1 会让同一批结果两次评测漂移 ±1-2 分
+                            # （base_t0 出现过 129→128），淹没小幅真实涨点。可用 EVAL_TEMPERATURE 调。
+                            temperature=float(os.getenv("EVAL_TEMPERATURE", "0")),
                             max_tokens=1000,
                         ),
                         timeout=self.config.request_timeout,
