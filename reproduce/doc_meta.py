@@ -13,9 +13,13 @@
                                结果 JSON 里的 question 字段必须保持原文——评测器
                                （eval_by_type / llm_answer_evaluator）按问题原文匹配题型。
 
-掉分风险≈0：未命中关键词的题与 baseline 完全一致；命中的题只是多了一段确定为真的
-统计量（如总页数）——"page 20 是否存在"这类题因此从必错变必对。词数是从提取文本
-算的近似值，说明里如实标注 approximate。
+掉分风险控制（首轮 30 篇实测后的两条修正）：
+  - 注入避让图/表题：题干带 "on page N" 的表格题也含 "page" 关键词，首轮被注入后
+    mm-t 85%→81% 轻微回退。统计量对这类题本无帮助，query.py 里对命中图/表意图
+    （detect_visual_intent）的题跳过注入——meta 收益保留、表题不再被扰。
+  - 措辞中性化：不再写"trust over retrieved text"（见 format_stats_note 内注释）。
+词数是从提取文本算的近似值，说明里如实标注 approximate。
+首轮战绩（30篇/177题）：meta 题 37%→53%（+5题），机制完全对应（详见 memory）。
 """
 
 import re
@@ -104,11 +108,14 @@ def format_stats_note(stats: dict) -> str:
     """生成附加在问题后的统计量说明（英文——DocBench 是英文语料）。"""
     tw = ", ".join(stats["top_words"]) or "n/a"
     aw = ", ".join(f"{a} ({c}x)" for a, c in stats["top_abbrevs"]) or "n/a"
+    # 措辞刻意中性：首轮实测用了 "trust these numbers over any retrieved text"，
+    # 导致部分非统计题（题干带 page 的表格题）被带偏、轻微掉分。统计量只做补充信息，
+    # 不得贬低检索内容的可信度。
     return (
-        "[Programmatically verified statistics of this document - "
-        "trust these numbers over any retrieved text: "
+        "[Supplementary document statistics, computed programmatically from the PDF: "
         f"total pages = {stats['pages']}; "
         f"approximate word count (from extracted text) = {stats['words']}; "
         f"most frequent words = {tw}; "
-        f"most frequent abbreviations = {aw}.]"
+        f"most frequent abbreviations = {aw}. "
+        "Use them only when the question asks about such document-level statistics.]"
     )

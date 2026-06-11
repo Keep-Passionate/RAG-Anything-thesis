@@ -202,16 +202,18 @@ async def process_with_rag(
         for query in queries:
             q = query["question"]
 
-            # 送给模型的问题（meta 题附加统计量；结果里的 question 保持原文供评测匹配）
-            q_llm = q
-            meta_used = False
-            if doc_stats and detect_meta_intent(q):
-                q_llm = f"{q}\n\n{format_stats_note(doc_stats)}"
-                meta_used = True
-
             # 本题是否开 VLM：全开 > 模态感知（关键词，零成本）> 关
             kw_visual, kw_table = detect_visual_intent(q)
             q_vlm = vlm_on or (modality_vlm_on and (kw_visual or kw_table))
+
+            # 送给模型的问题（meta 题附加统计量；结果里的 question 保持原文供评测匹配）。
+            # 问图/表的题跳过注入：首轮实测发现表格题（题干常带 "on page N"）被注入后
+            # 轻微掉分（mm-t 85%→81%），而统计量对这类题本无帮助——避让即可两全。
+            q_llm = q
+            meta_used = False
+            if doc_stats and detect_meta_intent(q) and not (kw_visual or kw_table):
+                q_llm = f"{q}\n\n{format_stats_note(doc_stats)}"
+                meta_used = True
 
             retrieved_context = None
             rr_triggered = False
