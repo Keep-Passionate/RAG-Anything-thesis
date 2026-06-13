@@ -28,6 +28,19 @@ def test_visual_intent():
     assert v
 
 
+def test_visual_intent_table_false_friends():
+    """目录类短语含 table 但不是数据表，不应判为表格意图（修复 autovlm 误触发）。"""
+    v, t = detect_visual_intent(
+        "What section in the table of contents details the strategic planning approach?"
+    )
+    assert not t and not v
+    v, t = detect_visual_intent("文档目录里哪一节讲战略规划？")
+    assert not t
+    # 真表格题仍要命中
+    v, t = detect_visual_intent("What value is in row 3 of the table?")
+    assert t
+
+
 # ---------------------------------------------------------------------------
 # count_image_evidence（与 raganything 的 Image Path 标记格式一致）
 # ---------------------------------------------------------------------------
@@ -53,6 +66,10 @@ def test_is_visual_chunk():
     assert is_visual_chunk("| col1 | col2 | col3 |\n| 1 | 2 | 3 |")  # markdown 表
     assert not is_visual_chunk("ordinary prose paragraph about revenue")
     assert not is_visual_chunk("a | b")  # 偶发管道符不算表
+    # 单行多管道符（长文本里偶发）不再误判为表（收紧判据）
+    assert not is_visual_chunk("choose a | b | c | d | e | f from the menu")
+    # 多行规整管道才算表
+    assert is_visual_chunk("| a | b |\n| c | d |\n| e | f |")
 
 
 # ---------------------------------------------------------------------------

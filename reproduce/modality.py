@@ -36,10 +36,23 @@ _TABLE_KWS = (
     "表", "表格", "表中", "单元格", "列", "行",
 )
 
+# 含 "table" 但不是"数据表格"的短语——命中后看图/路由会误触发（实测：autovlm 对
+# "table of contents 第几节"这类目录题误开 VLM 看歪）。检测前先把这些短语抹掉。
+_TABLE_FALSE_FRIENDS = (
+    "table of contents", "table of figures", "table of authorities",
+    "table of cases", "round table", "negotiating table", "目录",
+)
+
 
 def detect_visual_intent(question: str):
-    """纯关键词判断问题是否需要看图/表。返回 (wants_visual, wants_table)。"""
+    """纯关键词判断问题是否需要看图/表。返回 (wants_visual, wants_table)。
+
+    先剥离 "table of contents" 等含 table 但非数据表的短语，避免目录类题被误判为
+    表格意图（否则证据侧路由 / 避让门会把找目录的题当图表题处理）。
+    """
     q = (question or "").lower()
+    for ff in _TABLE_FALSE_FRIENDS:
+        q = q.replace(ff, " ")
     wants_table = any(k in q for k in _TABLE_KWS)
     wants_visual = any(k in q for k in _VISUAL_KWS)
     return wants_visual, wants_table
@@ -73,7 +86,10 @@ def is_visual_chunk(text: str) -> bool:
     tl = t.lower()
     if "<table" in tl or "<td" in tl or "table caption" in tl:
         return True
-    return t.count("|") >= 6  # markdown 表至少两行×三列的管道符密度
+    # markdown 表：多行且每行管道符密集。单行的偶发管道符（普通文本、代码、
+    # "a | b" 这类）不算——旧版只看总数 >=6 会误判含管道符的长文本。
+    pipe_lines = [ln for ln in t.splitlines() if ln.count("|") >= 2]
+    return len(pipe_lines) >= 2 and t.count("|") >= 6
 
 
 # ---------------------------------------------------------------------------
