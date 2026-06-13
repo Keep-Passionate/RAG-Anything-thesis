@@ -1010,6 +1010,9 @@ Respond with a JSON object:
 
     def save_evaluation_results(self):
         """Save evaluation results."""
+        # 确保输出目录存在（rm -rf eval_out 后首次 persist 会因父目录缺失而崩，
+        # 报 FileNotFoundError: ...json.tmp）。幂等，不影响已存在目录。
+        os.makedirs(self.config.output_dir, exist_ok=True)
         # Save the detailed JSON output.
         results_file = os.path.join(
             self.config.output_dir, "llm_evaluation_results.json"
