@@ -7,10 +7,15 @@
 查询期开关（默认全关 = 原版 baseline，逐个打开做消融）：
   ENABLE_VLM              : 每题都让 VLM 看检索到的图（全开，贵且对纯文本题加噪）
   ENABLE_MODALITY_VLM     : 只对"问图/表"的题开 VLM（关键词检测，零成本，精准投放）
-  ENABLE_AUTO_VLM         : 关键词 ∪ 证据侧路由——关键词没命中时再看检索上下文里
-                            有没有图片证据，有才开 VLM（治"题面不提图、答案在图里"
-                            的盲区；阈值 AUTO_VLM_MIN_IMAGES，默认 1）
-  ENABLE_DOC_META         : meta 题注入程序化统计量（页数/词数/高频词/缩写，见 doc_meta.py）
+  ENABLE_AUTO_VLM         : 【旧EMR,已证有害弃用】生成端证据路由,选择性看图反而掉分
+                            (54篇实测 -6.3pp;全开VLM是强基线,省钱式选择性看图漏题)
+  ENABLE_EMR              : 【新EMR】检索端模态增强——视觉意图题加大 chunk_top_k
+                            (EMR_CHUNK_TOP_K默认40)多捞图/表证据,保持全开VLM不变,
+                            治"对的图表没被检索到"(论文 A.5 text-centric bias)
+  ENABLE_DOC_META         : meta题注入程序化统计量(页数/词数/高频词/缩写/图表数/
+                            关键词计数v4"X出现几次"/某页内容,见 doc_meta.py)
+  ENABLE_NCG              : 表格数值计算接地——计算类题让模型抽数+列式、程序执行
+                            (Program-of-Thoughts,治财报算差值/百分比题,见 ncg.py)
   ENABLE_RERANK           : DashScope gte-rerank 重排检索结果
   RERANK_VISUAL_GUARD     : 重排视觉保位——问图/表的题保证截断后至少留
                             RERANK_GUARD_SLOTS(默认2) 个视觉/表格块（治 rerank 丢表题）
@@ -36,11 +41,21 @@ load_dotenv(dotenv_path=".env", override=False)
 from common import build_arg_parser, build_model_funcs, configure_logging, env_on  # noqa: E402
 from doc_meta import (  # noqa: E402
     compute_doc_stats,
+    count_mentions,
     detect_count_intent,
+    detect_mention_count_intent,
     detect_meta_intent,
+    extract_mention_target,
     extract_page_text,
     find_page_reference,
     format_stats_note,
+)
+from ncg import (  # noqa: E402
+    build_extraction_prompt,
+    detect_calc_intent,
+    format_calc_note,
+    parse_ncg_json,
+    safe_eval,
 )
 from modality import count_image_evidence, detect_visual_intent, guard_rerank_results  # noqa: E402
 from lightrag import LightRAG  # noqa: E402
@@ -190,8 +205,14 @@ async def process_with_rag(
         # ---- 查询期开关（默认全关 = baseline）----
         vlm_on = env_on("ENABLE_VLM")                      # 每题全开 VLM
         modality_vlm_on = env_on("ENABLE_MODALITY_VLM")    # 仅图/表意图题开 VLM
-        auto_vlm_on = env_on("ENABLE_AUTO_VLM")            # 关键词 ∪ 证据侧路由
+        auto_vlm_on = env_on("ENABLE_AUTO_VLM")            # 【旧EMR,已证有害弃用】生成端证据路由
         auto_vlm_min = int(os.getenv("AUTO_VLM_MIN_IMAGES", "1"))
+        # 新 EMR（检索端模态增强）：旧 EMR(AUTO_VLM)在生成端"选择性看图"反而掉分(全开VLM
+        # 是强基线)。新 EMR 不动看图、保持全开，改在【检索端】——视觉意图题加大 chunk_top_k
+        # 多捞图/表证据，治"对的图表没被检索到"(论文 A.5 text-centric bias)。
+        emr_on = env_on("ENABLE_EMR")
+        emr_chunk_top_k = int(os.getenv("EMR_CHUNK_TOP_K", "40"))  # 默认 2×（chunk_top_k=20）
+        ncg_on = env_on("ENABLE_NCG")                      # 表格数值计算接地
         save_ctx = env_on("SAVE_CONTEXT")                  # 存检索上下文供体检
         rr_on = env_on("ENABLE_RETRIEVAL_REFLECT")         # R2 补检索
         rr_top_k = int(os.getenv("RR_TOP_K", "80"))            # 默认 2×（top_k=40）
@@ -226,7 +247,19 @@ async def process_with_rag(
             # 一并给模型——"第 N 页讲什么"从猜变成读；N 越界则只有 total pages 兜底。
             q_llm = q
             meta_used = False
-            if doc_stats and (
+            # v4 关键词计数（"X 出现多少次"）优先——程序精确数指定词，避让门不挡它
+            mention_target = (
+                extract_mention_target(q)
+                if (doc_stats and detect_mention_count_intent(q)) else None
+            )
+            if mention_target:
+                n = count_mentions(doc_stats.get("_text", ""), mention_target)
+                q_llm = (
+                    f'{q}\n\n[Programmatically verified: the phrase "{mention_target}" '
+                    f"appears {n} times in the document text.]"
+                )
+                meta_used = True
+            elif doc_stats and (
                 detect_count_intent(q)
                 or (detect_meta_intent(q) and not (kw_visual or kw_table))
             ):
@@ -241,6 +274,29 @@ async def process_with_rag(
                         )
                 q_llm = f"{q}\n\n{note}"
                 meta_used = True
+
+            # NCG：计算类题——取检索context → 让模型抽数+列式（不直接算）→ 程序执行 →
+            # 注入"计算辅助"帮正常生成答对。多 1 次取 context + 1 次 LLM 抽数，仅计算题触发。
+            ncg_used = False
+            if ncg_on and detect_calc_intent(q):
+                try:
+                    ncg_ctx = await rag.aquery(
+                        q, mode="mix", only_need_context=True, vlm_enhanced=False
+                    )
+                    ext = await llm_model_func(
+                        build_extraction_prompt(q, ncg_ctx), temperature=0
+                    )
+                    parsed = parse_ncg_json(ext)
+                    if parsed:
+                        val = safe_eval(parsed["formula"], parsed["numbers"])
+                        if val is not None:
+                            q_llm = (
+                                f"{q_llm}\n\n"
+                                f"{format_calc_note(parsed['numbers'], parsed['formula'], val)}"
+                            )
+                            ncg_used = True
+                except Exception as e:
+                    logger.warning(f"NCG failed, skip: {e}")
 
             retrieved_context = None
             rr_triggered = False
@@ -296,8 +352,13 @@ async def process_with_rag(
                         and count_image_evidence(retrieved_context) >= auto_vlm_min):
                     q_vlm = True
                     vlm_trigger = "evidence"
+                # 新 EMR：视觉意图题在检索端加大 chunk_top_k 多捞图/表证据（不改看图）
+                emr_kw = {}
+                if emr_on and (kw_visual or kw_table):
+                    emr_kw["chunk_top_k"] = emr_chunk_top_k
                 result = await rag.aquery(
-                    q_llm, mode="mix", response_type="One Sentence", vlm_enhanced=q_vlm
+                    q_llm, mode="mix", response_type="One Sentence",
+                    vlm_enhanced=q_vlm, **emr_kw
                 )
 
             rec = {
@@ -310,6 +371,8 @@ async def process_with_rag(
                 rec["vlm_trigger"] = vlm_trigger  # all / keyword / evidence / ""
             if doc_stats is not None:
                 rec["doc_meta_used"] = meta_used
+            if ncg_on:
+                rec["ncg_used"] = ncg_used
             if rr_on:
                 rec["rr_triggered"] = rr_triggered
                 rec["rr_verdict"] = rr_verdict
