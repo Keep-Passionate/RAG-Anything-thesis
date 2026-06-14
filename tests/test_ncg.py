@@ -26,6 +26,10 @@ def test_calc_intent():
         "Who is the CEO of the company?",
         "What is the main content of Section III?",
         "How many pages does the document have?",
+        # 收紧后这些不再误触发（去掉了 exceed/average/total number of 等宽词）
+        "Does the company's revenue exceed 1 billion?",
+        "What is the average tenure of board members?",
+        "What is the total number of authors?",
     ]
     for q in neg:
         assert not detect_calc_intent(q), q

@@ -25,12 +25,16 @@ import json
 import operator
 import re
 
-# 命中任一关键词即认为是"需要数值计算"的题。
+# 只收【明确的】计算信号。稳妥第一:宁可漏(不触发=原版行为,无害),不可乱触发——
+# NCG 误触发不只浪费钱,更危险的是若从错误的表抽错数字、算出错误结果,注入的"计算
+# 辅助"会把模型带偏、答错本来对的题。故去掉 average/sum of/total number of/exceed/
+# more than 等太宽、易误命中比较题/计数题的词,只留下高确定性的计算短语。
 _CALC_KWS = (
-    "calculate", "how much did", "how many more", "how many fewer",
-    "difference between", "increase", "decrease", "decline", "growth",
-    "change from", "change in", "percentage", "percent", " ratio",
-    "average", "sum of", "total number of", "exceed", "more than",
+    "calculate", "by how much", "how much did", "how much more", "how much less",
+    "how many more", "how many fewer", "difference between",
+    "percentage", "percent", "ratio of",
+    "increase from", "decrease from", "change from", "grew from",
+    "declined from", "decline in",
 )
 
 
