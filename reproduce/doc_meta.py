@@ -87,6 +87,38 @@ def find_page_reference(question: str):
     return int(m.group(1)) if m else None
 
 
+# v4：关键词计数题（"how many times does the document mention 'X'"）。DSG 现在只数
+# 高频词 top3，这里加"数指定词/短语"——程序精确数，是 DSG 从"数高频"到"数指定"的
+# 自然延伸（错题例：ASX_LOV "how many times mention 'net working capital'"）。
+_MENTION_TARGET_RE = re.compile(
+    r'["“‘\']([^"”’\']{1,60})["”’\']'  # 引号内（优先）
+)
+
+
+def detect_mention_count_intent(question: str) -> bool:
+    """问题是否在问"某词/短语在文档里出现多少次"。零 LLM 成本。"""
+    q = (question or "").lower()
+    return "how many times" in q and (
+        "mention" in q or "appear" in q or "occur" in q or "use the word" in q
+    )
+
+
+def extract_mention_target(question: str):
+    """从问题抽出要数的目标词/短语（取引号内内容）。抽不到返回 None。
+
+    只接受引号内的明确目标——无引号的"how many times X"边界模糊、易抽错，宁可不处理。
+    """
+    m = _MENTION_TARGET_RE.search(question or "")
+    return m.group(1).strip() if m else None
+
+
+def count_mentions(text: str, target: str) -> int:
+    """数 target（不区分大小写）在 text 中出现的次数。纯函数。"""
+    if not text or not target:
+        return 0
+    return len(re.findall(re.escape(target), text, flags=re.IGNORECASE))
+
+
 def text_stats(text: str) -> dict:
     """从提取文本计算 词数 / 高频词 top3 / 高频缩写 top3（纯函数，可单测）。
 
@@ -136,6 +168,7 @@ def compute_doc_stats(pdf_path: str):
             return None
     stats = text_stats(text)
     stats["pages"] = pages
+    stats["_text"] = text  # 供 count_mentions 复用（带下划线=内部用，不进 note）
     cl = locate_content_list(pdf_path)
     if cl:
         elements = count_elements(cl)

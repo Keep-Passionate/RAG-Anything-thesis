@@ -9,12 +9,29 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "reproduce"))
 
 from doc_meta import (  # noqa: E402
     count_elements,
+    count_mentions,
     detect_count_intent,
+    detect_mention_count_intent,
     detect_meta_intent,
+    extract_mention_target,
     find_page_reference,
     format_stats_note,
     text_stats,
 )
+
+
+def test_mention_count():
+    """v4 关键词计数:识别 + 抽取目标 + 计数。"""
+    q = 'How many times does the document mention "net working capital"?'
+    assert detect_mention_count_intent(q)
+    assert extract_mention_target(q) == "net working capital"
+    assert not detect_mention_count_intent("How many pages does the document have?")
+    # 无引号目标不抽（边界模糊宁可不处理）
+    assert extract_mention_target("how many times is revenue mentioned") is None
+    # 计数不区分大小写
+    txt = "Revenue grew. The REVENUE target. revenue again."
+    assert count_mentions(txt, "revenue") == 3
+    assert count_mentions("", "x") == 0
 
 
 # ---------------------------------------------------------------------------
