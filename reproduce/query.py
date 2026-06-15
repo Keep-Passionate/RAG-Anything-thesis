@@ -16,6 +16,8 @@
                             关键词计数v4"X出现几次"/某页内容,见 doc_meta.py)
   ENABLE_NCG              : 表格数值计算接地——计算类题让模型抽数+列式、程序执行
                             (Program-of-Thoughts,治财报算差值/百分比题,见 ncg.py)
+  ENABLE_DOC_OUTLINE      : 文档结构接地——结构/前页题注入章节树/首页footer
+                            (治"发表在哪/几节/某节讲什么",与DSG独立,见 doc_outline.py)
   ENABLE_RERANK           : DashScope gte-rerank 重排检索结果
   RERANK_VISUAL_GUARD     : 重排视觉保位——问图/表的题保证截断后至少留
                             RERANK_GUARD_SLOTS(默认2) 个视觉/表格块（治 rerank 丢表题）
@@ -57,6 +59,11 @@ from ncg import (  # noqa: E402
     load_doc_tables,
     parse_ncg_json,
     safe_eval,
+)
+from doc_outline import (  # noqa: E402
+    detect_structure_intent,
+    format_outline_note,
+    load_outline,
 )
 from modality import count_image_evidence, detect_visual_intent, guard_rerank_results  # noqa: E402
 from lightrag import LightRAG  # noqa: E402
@@ -231,6 +238,19 @@ async def process_with_rag(
             else:
                 logger.warning("ENABLE_DOC_META: failed to read PDF stats, notes disabled")
 
+        # 文档结构（ENABLE_DOC_OUTLINE，与 DSG 平行、独立）：整篇只读一次 content_list，
+        # 结构/前页题注入"提取的结构信息"（章节树 / 首页 footer）。
+        outline = None
+        if env_on("ENABLE_DOC_OUTLINE"):
+            outline = load_outline(file_path)
+            if outline:
+                logger.info(
+                    "Doc outline ENABLED: %d headings, %d level-1 sections",
+                    len(outline["sections"]), outline["n_sections"],
+                )
+            else:
+                logger.warning("ENABLE_DOC_OUTLINE: no content_list/outline, notes disabled")
+
         results = []
         for query in queries:
             q = query["question"]
@@ -275,6 +295,17 @@ async def process_with_rag(
                         )
                 q_llm = f"{q}\n\n{note}"
                 meta_used = True
+
+            # doc_outline：结构/前页题注入"提取的结构信息"（章节树 / 首页 footer）。
+            # 与 DSG 独立、可叠加；意图互斥时一般只有一个触发。
+            outline_used = False
+            if outline:
+                s_intent = detect_structure_intent(q)
+                if s_intent:
+                    onote = format_outline_note(outline, s_intent)
+                    if onote:
+                        q_llm = f"{q_llm}\n\n{onote}"
+                        outline_used = True
 
             # NCG：计算类题——取检索context → 让模型抽数+列式（不直接算）→ 程序执行 →
             # 注入"计算辅助"帮正常生成答对。多 1 次取 context + 1 次 LLM 抽数，仅计算题触发。
@@ -374,6 +405,8 @@ async def process_with_rag(
                 rec["vlm_trigger"] = vlm_trigger  # all / keyword / evidence / ""
             if doc_stats is not None:
                 rec["doc_meta_used"] = meta_used
+            if outline is not None:
+                rec["outline_used"] = outline_used
             if ncg_on:
                 rec["ncg_used"] = ncg_used
             if rr_on:
