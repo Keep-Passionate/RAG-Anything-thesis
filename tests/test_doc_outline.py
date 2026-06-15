@@ -20,6 +20,8 @@ def test_structure_intent_frontmatter():
         "When was the document approved?",
         "What is the publication date of the report?",
         "Which conference was this paper presented at?",
+        "Are all authors from the same affiliation?",
+        "What is the affiliation of the authors?",
     ]
     for q in pos:
         assert detect_structure_intent(q) == "frontmatter", q

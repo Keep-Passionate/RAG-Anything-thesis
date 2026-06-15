@@ -30,6 +30,10 @@ _FRONT_RES = (
     re.compile(r"\b(publication|published)\s+(venue|date|year)\b", re.IGNORECASE),
     re.compile(r"\b(which|what)\s+(conference|journal|venue|proceedings)\b", re.IGNORECASE),
     re.compile(r"\bdate\s+of\s+(publication|approval|issue)\b", re.IGNORECASE),
+    # 作者单位/隶属——印在标题页(前页正文),实测题例 "are all authors from the
+    # same affiliation"。要求 author 上下文，避免误命中正文里普通的 affiliation。
+    re.compile(r"\b(authors?|institution|organi[sz]ation)\b.{0,40}\baffiliat", re.IGNORECASE),
+    re.compile(r"\baffiliat\w*\b.{0,40}\bauthors?\b", re.IGNORECASE),
 )
 
 # 章节结构意图：数节/数 part，或"哪节讲 X / 某节主题"。
