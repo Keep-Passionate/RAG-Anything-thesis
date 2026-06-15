@@ -192,7 +192,10 @@ def locate_content_list(pdf_path: str):
         if cand.exists():
             return cand
     if root.exists():
-        hits = list(root.glob(f"*/*/{stem}_content_list.json"))
+        # MinerU 实际输出多套了 <stem>_<hash>/<stem>/auto/ 两三层，原 */*/ 太浅匹配不到
+        # （服务器上 PARSE_OUTPUT_DIR 即便指对目录也找不到）→ 用递归 ** 兜底，
+        # 绑定到具体 stem、范围有界；多份同 stem 取排序首个（content_list 内容一致）。
+        hits = sorted(root.glob(f"**/{stem}_content_list.json"))
         if hits:
             return hits[0]
     return None
