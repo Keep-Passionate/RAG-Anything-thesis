@@ -54,22 +54,71 @@ _FEWSHOT = (
 )
 
 
-def build_extraction_prompt(question: str, context: str, max_ctx: int = 6000) -> str:
-    """构造让模型从表格抽数字 + 列算式的提示（PoT；不让它直接算）。"""
+def build_extraction_prompt(question: str, context: str, tables: str = "",
+                            max_ctx: int = 6000) -> str:
+    """构造让模型从表格抽数字 + 列算式的提示（PoT；不让它直接算）。
+
+    tables：MinerU 解析的完整原始表格（若提供）。诊断发现 NCG 从检索碎片抽数易错,
+    给完整表格能提升抽数质量——这是 NCG 涨点的关键。
+    """
     ctx = (context or "")[:max_ctx]
+    tbl = (tables or "")[:6000]
+    tbl_section = (
+        "\n\nFull parsed tables from the document (PREFER these for exact numbers — "
+        f"they are more complete and accurate than the retrieved context):\n{tbl}"
+        if tbl else ""
+    )
     return (
         "You are given a question that requires NUMERICAL CALCULATION over a document's "
         "tables, plus the retrieved context. Do NOT compute the final answer yourself. "
-        "Instead, extract the exact numbers needed from the context and express the "
-        "calculation as a formula.\n\n"
+        "Instead, extract the exact numbers needed and express the calculation as a formula.\n\n"
         f"{_FEWSHOT}\n\n"
-        "Rules: each value in \"numbers\" must be a plain number found in the context; "
-        "\"formula\" may ONLY use the declared number names and the operators + - * / and "
-        "parentheses. Output ONLY a JSON object with keys \"numbers\" (name->number) and "
-        '"formula" (string). If the needed numbers are NOT clearly in the context, output '
+        'Rules: each value in "numbers" must be a plain number found in the provided text; '
+        '"formula" may ONLY use the declared number names and the operators + - * / and '
+        'parentheses. Output ONLY a JSON object with keys "numbers" (name->number) and '
+        '"formula" (string). If the needed numbers are NOT clearly present, output '
         '{"numbers": {}, "formula": ""}.\n\n'
-        f"Context:\n{ctx}\n\nQuestion: {question}\n\nOutput:"
+        f"Context:\n{ctx}{tbl_section}\n\nQuestion: {question}\n\nOutput:"
     )
+
+
+def load_doc_tables(pdf_path: str, question: str, max_chars: int = 6000) -> str:
+    """从 MinerU content_list 取完整表格(caption + HTML body),用问题关键词筛相关的。
+
+    NCG 默认从检索切碎的上下文抽数、易错;给模型完整的原始表格能提升抽数准确率。
+    找不到 content_list 或无表格则返回 ''(NCG 退回只用检索上下文,无害)。
+    """
+    try:
+        from doc_meta import locate_content_list  # 复用 DSG 的定位逻辑
+
+        cl = locate_content_list(pdf_path)
+        if not cl:
+            return ""
+        with open(cl, encoding="utf-8") as f:
+            items = json.load(f)
+    except Exception:
+        return ""
+    tables = []
+    for it in items:
+        if isinstance(it, dict) and it.get("type") == "table":
+            cap = it.get("table_caption") or []
+            cap = " ".join(cap) if isinstance(cap, list) else str(cap)
+            body = it.get("table_body") or it.get("text") or ""
+            t = (cap + "\n" + str(body)).strip()
+            if t:
+                tables.append(t)
+    if not tables:
+        return ""
+    # 用问题里的实词(4+字母)和表格内容的重合度排序,优先给最相关的表
+    qwords = set(re.findall(r"[a-z]{4,}", (question or "").lower()))
+    tables.sort(key=lambda t: -len(qwords & set(re.findall(r"[a-z]{4,}", t.lower()))))
+    out, total = [], 0
+    for t in tables:
+        if total + len(t) > max_chars:
+            break
+        out.append(t)
+        total += len(t)
+    return "\n---\n".join(out)
 
 
 def parse_ncg_json(text: str):

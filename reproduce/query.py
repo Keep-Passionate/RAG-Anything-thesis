@@ -54,6 +54,7 @@ from ncg import (  # noqa: E402
     build_extraction_prompt,
     detect_calc_intent,
     format_calc_note,
+    load_doc_tables,
     parse_ncg_json,
     safe_eval,
 )
@@ -283,8 +284,10 @@ async def process_with_rag(
                     ncg_ctx = await rag.aquery(
                         q, mode="mix", only_need_context=True, vlm_enhanced=False
                     )
+                    # 给模型完整原始表格(content_list)而非检索碎片,提升抽数准确率
+                    ncg_tables = load_doc_tables(file_path, q)
                     ext = await llm_model_func(
-                        build_extraction_prompt(q, ncg_ctx), temperature=0
+                        build_extraction_prompt(q, ncg_ctx, ncg_tables), temperature=0
                     )
                     parsed = parse_ncg_json(ext)
                     if parsed:

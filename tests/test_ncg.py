@@ -6,10 +6,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "reproduce"))
 
 from ncg import (  # noqa: E402
+    build_extraction_prompt,
     detect_calc_intent,
     parse_ncg_json,
     safe_eval,
 )
+
+
+def test_build_prompt_with_tables():
+    """带完整表格时,提示里要含表格段;不带时不含。"""
+    p = build_extraction_prompt("How much change?", "some ctx", tables="| a | b |\n| 1 | 2 |")
+    assert "Full parsed tables" in p and "| a | b |" in p
+    p2 = build_extraction_prompt("How much change?", "some ctx")
+    assert "Full parsed tables" not in p2
 
 
 def test_calc_intent():
