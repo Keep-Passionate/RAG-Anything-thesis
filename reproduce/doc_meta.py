@@ -198,19 +198,41 @@ def locate_content_list(pdf_path: str):
     return None
 
 
+# 附录/参考文献起始标题——其后的图表算"附录",治 "how many figures excluding appendix"
+_APPENDIX_RE = re.compile(r"\b(references?|appendix|appendices|bibliography)\b", re.IGNORECASE)
+
+
 def count_elements(content_list_path):
-    """从 MinerU content_list 精确计数图/表/公式元素。解析失败返回 None。"""
+    """从 MinerU content_list 精确计数图/表/公式元素。解析失败返回 None。
+
+    附加"不含附录"计数(figures_body/tables_body):找到第一个"标题级且文本含
+    References/Appendix"的元素的页码,只数它之前的图表——治 "excluding appendix" 题。
+    """
     try:
         with open(content_list_path, encoding="utf-8") as f:
-            items = json.load(f)
-        types = Counter(str(it.get("type", "")) for it in items if isinstance(it, dict))
-        return {
-            "figures": types.get("image", 0),
-            "tables": types.get("table", 0),
-            "equations": types.get("equation", 0),
-        }
+            items = [it for it in json.load(f) if isinstance(it, dict)]
     except Exception:
         return None
+    # 找附录起始页
+    appendix_page = None
+    for it in items:
+        if it.get("text_level") and _APPENDIX_RE.search(str(it.get("text", ""))):
+            appendix_page = it.get("page_idx")
+            break
+
+    def cnt(t, body_only=False):
+        els = [it for it in items if it.get("type") == t]
+        if body_only and appendix_page is not None:
+            return sum(1 for e in els if (e.get("page_idx") or 0) < appendix_page)
+        return len(els)
+
+    return {
+        "figures": cnt("image"),
+        "tables": cnt("table"),
+        "equations": cnt("equation"),
+        "figures_body": cnt("image", body_only=True),
+        "tables_body": cnt("table", body_only=True),
+    }
 
 
 def extract_page_text(pdf_path: str, page_no: int, max_chars: int = 1200) -> str:
@@ -247,10 +269,12 @@ def format_stats_note(stats: dict) -> str:
         f"most frequent abbreviations = {aw}",
     ]
     if "figures" in stats:  # v3：content_list 可用时的精确元素计数
+        fb = stats.get("figures_body", stats["figures"])
+        tb = stats.get("tables_body", stats["tables"])
         parts.append(
-            f"parsed element counts (whole document, incl. appendix): "
-            f"figures = {stats['figures']}, tables = {stats['tables']}, "
-            f"equations = {stats['equations']}"
+            f"parsed element counts: figures = {stats['figures']} "
+            f"(excluding appendix/references: {fb}); tables = {stats['tables']} "
+            f"(excluding appendix: {tb}); equations = {stats['equations']}"
         )
     return (
         "[Supplementary document statistics, computed programmatically from the PDF: "

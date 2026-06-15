@@ -130,9 +130,15 @@ def test_find_page_reference():
 
 def test_count_elements(tmp_path):
     p = tmp_path / "x_content_list.json"
-    p.write_text(json.dumps(
-        [{"type": "image"}, {"type": "image"}, {"type": "table"},
-         {"type": "text"}, {"type": "equation"}]
-    ), encoding="utf-8")
-    assert count_elements(p) == {"figures": 2, "tables": 1, "equations": 1}
+    p.write_text(json.dumps([
+        {"type": "image", "page_idx": 1},
+        {"type": "image", "page_idx": 2},
+        {"type": "table", "page_idx": 3},
+        {"type": "text", "text_level": 1, "text": "References", "page_idx": 5},
+        {"type": "image", "page_idx": 6},   # 附录里的图,不算 body
+        {"type": "equation", "page_idx": 2},
+    ]), encoding="utf-8")
+    r = count_elements(p)
+    assert r["figures"] == 3 and r["tables"] == 1 and r["equations"] == 1
+    assert r["figures_body"] == 2   # 排除 References(page5) 之后的图
     assert count_elements(tmp_path / "missing.json") is None
