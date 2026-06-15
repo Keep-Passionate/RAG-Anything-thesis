@@ -301,7 +301,10 @@ async def process_with_rag(
             outline_used = False
             if outline:
                 s_intent = detect_structure_intent(q)
-                if s_intent:
+                # 只注入 frontmatter（前页：发表/批准/作者单位）——实测有效且零副作用。
+                # sections（章节树）实测会误导 "how many parts" 这类计数题（10-K 的正式
+                # Part I~IV 与 text_level 标题层级对不上），赢0砸1，故禁用其注入。
+                if s_intent == "frontmatter":
                     onote = format_outline_note(outline, s_intent)
                     if onote:
                         q_llm = f"{q_llm}\n\n{onote}"
