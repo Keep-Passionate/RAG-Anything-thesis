@@ -3,8 +3,9 @@
 
 回答"B 比 A 多对的 N 题到底是哪些、是不是机制带来的"：
   - 列出 B 赢回的题（A 错→B 对）与 B 搞砸的题（A 对→B 错），按题型分组统计；
-  - 自动读取 qa_results_<B>.json 里的 doc_meta_used / vlm_used / rr_triggered
-    标记——验证翻转是否真的发生在"被注入统计量/看了图/补了检索"的题上；
+  - 自动读取 qa_results_<B>.json 里的 doc_meta_used / outline_used / anchor_used /
+    ncg_used / vlm_used / rr_triggered 标记——验证翻转是否真的发生在"被注入统计量/
+    抄了前页/接地了被点名元素/看了图/补了检索"的题上；
   - 末尾给出净变化与不一致对数，用于显著性粗判：净变化远小于不一致总数 = 噪声味重，
     净变化接近不一致总数 = 一边倒的真信号。
 
@@ -73,7 +74,8 @@ def load_flags(qa_dir, doc_map, method, doc_id, q_normed):
                 if norm(rec.get("question")) == q_normed:
                     return {
                         k: rec[k]
-                        for k in ("doc_meta_used", "vlm_used", "vlm_trigger", "rr_triggered")
+                        for k in ("doc_meta_used", "outline_used", "anchor_used",
+                                  "ncg_used", "vlm_used", "vlm_trigger", "rr_triggered")
                         if k in rec
                     }
     except Exception:
