@@ -18,6 +18,8 @@
                             (Program-of-Thoughts,治财报算差值/百分比题,见 ncg.py)
   ENABLE_DOC_OUTLINE      : 文档结构接地——结构/前页题注入章节树/首页footer
                             (治"发表在哪/几节/某节讲什么",与DSG独立,见 doc_outline.py)
+  ENABLE_DOC_ANCHOR       : 被点名元素接地——"问某张具体表/图"的题(according to Table 8)
+                            按标号确定性定位该元素并注入其内容(与DSG独立,见 doc_anchor.py)
   ENABLE_RERANK           : DashScope gte-rerank 重排检索结果
   RERANK_VISUAL_GUARD     : 重排视觉保位——问图/表的题保证截断后至少留
                             RERANK_GUARD_SLOTS(默认2) 个视觉/表格块（治 rerank 丢表题）
@@ -64,6 +66,12 @@ from doc_outline import (  # noqa: E402
     detect_structure_intent,
     format_outline_note,
     load_outline,
+)
+from doc_anchor import (  # noqa: E402
+    detect_element_reference,
+    find_referenced_element,
+    format_anchor_note,
+    load_content_items,
 )
 from modality import count_image_evidence, detect_visual_intent, guard_rerank_results  # noqa: E402
 from lightrag import LightRAG  # noqa: E402
@@ -248,6 +256,16 @@ async def process_with_rag(
             else:
                 logger.warning("ENABLE_DOC_OUTLINE: no content_list/front matter, notes disabled")
 
+        # 被点名元素（ENABLE_DOC_ANCHOR，与 DSG/outline 平行、独立）：整篇只读一次
+        # content_list，"问某张具体表/图"的题按标号定位该元素、把内容注入（见 doc_anchor.py）。
+        anchor_items = None
+        if env_on("ENABLE_DOC_ANCHOR"):
+            anchor_items = load_content_items(file_path)
+            if anchor_items:
+                logger.info("Doc anchor ENABLED: %d content_list items", len(anchor_items))
+            else:
+                logger.warning("ENABLE_DOC_ANCHOR: no content_list, notes disabled")
+
         results = []
         for query in queries:
             q = query["question"]
@@ -302,6 +320,18 @@ async def process_with_rag(
                 if onote:
                     q_llm = f"{q_llm}\n\n{onote}"
                     outline_used = True
+
+            # doc_anchor：题目点名某张具体表/图时，按标号确定性定位该元素并注入其内容。
+            # 与 DSG/outline 独立、纯加法；定位不到则不注入（对 baseline 零风险）。
+            anchor_used = False
+            if anchor_items:
+                ref = detect_element_reference(q)
+                if ref:
+                    content = find_referenced_element(anchor_items, *ref)
+                    anote = format_anchor_note(ref[0], ref[1], content)
+                    if anote:
+                        q_llm = f"{q_llm}\n\n{anote}"
+                        anchor_used = True
 
             # NCG：计算类题——取检索context → 让模型抽数+列式（不直接算）→ 程序执行 →
             # 注入"计算辅助"帮正常生成答对。多 1 次取 context + 1 次 LLM 抽数，仅计算题触发。
@@ -403,6 +433,8 @@ async def process_with_rag(
                 rec["doc_meta_used"] = meta_used
             if outline is not None:
                 rec["outline_used"] = outline_used
+            if anchor_items is not None:
+                rec["anchor_used"] = anchor_used
             if ncg_on:
                 rec["ncg_used"] = ncg_used
             if rr_on:
