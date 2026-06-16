@@ -242,14 +242,11 @@ async def process_with_rag(
         # 结构/前页题注入"提取的结构信息"（章节树 / 首页 footer）。
         outline = None
         if env_on("ENABLE_DOC_OUTLINE"):
-            outline = load_outline(file_path)
+            outline = load_outline(file_path)   # 前页正文字符串（content_list 前1~2页）
             if outline:
-                logger.info(
-                    "Doc outline ENABLED: %d headings, %d level-1 sections",
-                    len(outline["sections"]), outline["n_sections"],
-                )
+                logger.info("Doc outline ENABLED: front matter %d chars", len(outline))
             else:
-                logger.warning("ENABLE_DOC_OUTLINE: no content_list/outline, notes disabled")
+                logger.warning("ENABLE_DOC_OUTLINE: no content_list/front matter, notes disabled")
 
         results = []
         for query in queries:
@@ -299,16 +296,12 @@ async def process_with_rag(
             # doc_outline：结构/前页题注入"提取的结构信息"（章节树 / 首页 footer）。
             # 与 DSG 独立、可叠加；意图互斥时一般只有一个触发。
             outline_used = False
-            if outline:
-                s_intent = detect_structure_intent(q)
-                # 只注入 frontmatter（前页：发表/批准/作者单位）——实测有效且零副作用。
-                # sections（章节树）实测会误导 "how many parts" 这类计数题（10-K 的正式
-                # Part I~IV 与 text_level 标题层级对不上），赢0砸1，故禁用其注入。
-                if s_intent == "frontmatter":
-                    onote = format_outline_note(outline, s_intent)
-                    if onote:
-                        q_llm = f"{q_llm}\n\n{onote}"
-                        outline_used = True
+            # 前页接地：只对"问发表/批准/作者单位"等前页题注入 content_list 前页正文。
+            if outline and detect_structure_intent(q):
+                onote = format_outline_note(outline)
+                if onote:
+                    q_llm = f"{q_llm}\n\n{onote}"
+                    outline_used = True
 
             # NCG：计算类题——取检索context → 让模型抽数+列式（不直接算）→ 程序执行 →
             # 注入"计算辅助"帮正常生成答对。多 1 次取 context + 1 次 LLM 抽数，仅计算题触发。
