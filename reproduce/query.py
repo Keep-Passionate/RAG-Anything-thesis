@@ -20,6 +20,8 @@
                             (治"发表在哪/几节/某节讲什么",与DSG独立,见 doc_outline.py)
   ENABLE_DOC_ANCHOR       : 被点名元素接地——"问某张具体表/图"的题(according to Table 8)
                             按标号确定性定位该元素并注入其内容(与DSG独立,见 doc_anchor.py)
+  ENABLE_DOC_LOCATE       : 页码定位接地(Localization)——"X在第几页"的题注入
+                            "章节标题→页码"索引,把定位从猜变查表(与DSG独立,见 doc_locate.py)
   ENABLE_RERANK           : DashScope gte-rerank 重排检索结果
   RERANK_VISUAL_GUARD     : 重排视觉保位——问图/表的题保证截断后至少留
                             RERANK_GUARD_SLOTS(默认2) 个视觉/表格块（治 rerank 丢表题）
@@ -72,6 +74,11 @@ from doc_anchor import (  # noqa: E402
     find_referenced_element,
     format_anchor_note,
     load_content_items,
+)
+from doc_locate import (  # noqa: E402
+    build_heading_page_index,
+    detect_location_intent,
+    format_locate_note,
 )
 from modality import count_image_evidence, detect_visual_intent, guard_rerank_results  # noqa: E402
 from lightrag import LightRAG  # noqa: E402
@@ -266,6 +273,16 @@ async def process_with_rag(
             else:
                 logger.warning("ENABLE_DOC_ANCHOR: no content_list, notes disabled")
 
+        # 页码定位（ENABLE_DOC_LOCATE，Localization 类，独立模块）：整篇只读一次 content_list，
+        # 构造"章节标题→页码"索引，"X 在第几页"的题注入该索引、把定位从猜变查表。
+        locate_index = None
+        if env_on("ENABLE_DOC_LOCATE"):
+            locate_index = build_heading_page_index(file_path)
+            if locate_index:
+                logger.info("Doc locate ENABLED: heading-page index %d chars", len(locate_index))
+            else:
+                logger.warning("ENABLE_DOC_LOCATE: no content_list/headings, notes disabled")
+
         results = []
         for query in queries:
             q = query["question"]
@@ -332,6 +349,15 @@ async def process_with_rag(
                     if anote:
                         q_llm = f"{q_llm}\n\n{anote}"
                         anchor_used = True
+
+            # doc_locate：问"X 在第几页"的题，注入"章节标题→页码"索引（Localization）。
+            # 与 DSG/outline/anchor 独立、纯加法；无标题索引则不注入（对 baseline 零风险）。
+            locate_used = False
+            if locate_index and detect_location_intent(q):
+                lnote = format_locate_note(locate_index)
+                if lnote:
+                    q_llm = f"{q_llm}\n\n{lnote}"
+                    locate_used = True
 
             # NCG：计算类题——取检索context → 让模型抽数+列式（不直接算）→ 程序执行 →
             # 注入"计算辅助"帮正常生成答对。多 1 次取 context + 1 次 LLM 抽数，仅计算题触发。
@@ -435,6 +461,8 @@ async def process_with_rag(
                 rec["outline_used"] = outline_used
             if anchor_items is not None:
                 rec["anchor_used"] = anchor_used
+            if locate_index is not None:
+                rec["locate_used"] = locate_used
             if ncg_on:
                 rec["ncg_used"] = ncg_used
             if rr_on:
