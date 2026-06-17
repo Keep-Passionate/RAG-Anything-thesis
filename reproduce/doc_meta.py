@@ -63,7 +63,8 @@ def detect_meta_intent(question: str) -> bool:
 # query.py 的"避让图/表题"门拦下，但它们恰恰是统计量能精确回答的——所以单独识别、
 # 在 query.py 里覆盖避让门（归因实锤：'how many figures excluding appendix' 曾因此丢分）。
 _COUNT_RE = re.compile(
-    r"how\s+many\s+(?:figures?|images?|tables?|equations?|charts?|pictures?|illustrations?)",
+    r"how\s+many\s+(?:figures?|images?|tables?|equations?|charts?|pictures?|"
+    r"illustrations?|footnotes?|sections?)",
     re.IGNORECASE,
 )
 _COUNT_KWS_ZH = ("几张图", "多少张图", "几幅图", "几个表", "多少个表", "几个公式", "多少个公式")
@@ -95,21 +96,47 @@ _MENTION_TARGET_RE = re.compile(
 )
 
 
+# 无引号兜底：DocBench 里目标常是问句末尾的专名/短语
+# （"...mention WikiText-2?" / "...mention the name of Global reinsurance?"），原版只认
+# 引号导致这些漏检。抓 "mention[s/ed] [the word/name/phrase/term [of]]" 之后、问号前的尾串。
+_MENTION_TAIL_RE = re.compile(
+    r"mention(?:s|ed)?\s+(?:the\s+(?:word|name|phrase|term)s?\s+(?:of\s+)?)?(.+?)\s*[?.!]*\s*$",
+    re.IGNORECASE,
+)
+# 尾串若只是从句/指代（it / the document …），判为没抽到，宁可不数
+_MENTION_REJECT_RE = re.compile(
+    r"^(it|them|this|that|these|those|the\s+(document|report|paper|text))\b", re.IGNORECASE
+)
+
+
 def detect_mention_count_intent(question: str) -> bool:
-    """问题是否在问"某词/短语在文档里出现多少次"。零 LLM 成本。"""
+    """问题是否在问"某词/短语在文档里出现多少次"。零 LLM 成本。
+
+    用 "how many time"（不带 s）以兼容 DocBench 里 "how many time does ... mention" 的笔误。
+    """
     q = (question or "").lower()
-    return "how many times" in q and (
+    return "how many time" in q and (
         "mention" in q or "appear" in q or "occur" in q or "use the word" in q
     )
 
 
 def extract_mention_target(question: str):
-    """从问题抽出要数的目标词/短语（取引号内内容）。抽不到返回 None。
+    """抽出要数的目标词/短语。优先引号内；无引号时取 "mention …" 之后的句尾串。
 
-    只接受引号内的明确目标——无引号的"how many times X"边界模糊、易抽错，宁可不处理。
+    抽不到、或尾串明显是从句/指代时返回 None（边界模糊宁可不处理）。
     """
-    m = _MENTION_TARGET_RE.search(question or "")
-    return m.group(1).strip() if m else None
+    q = (question or "").strip()
+    m = _MENTION_TARGET_RE.search(q)
+    if m:
+        return m.group(1).strip()
+    m = _MENTION_TAIL_RE.search(q)
+    if not m:
+        return None
+    t = m.group(1).strip().strip("\"'“”‘’")
+    # 太长(>6词)多半把后续从句也抓进来了 → 判过抽、不数(宁可漏不可乱)
+    if not (1 <= len(t) <= 50) or len(t.split()) > 6 or _MENTION_REJECT_RE.match(t):
+        return None
+    return t
 
 
 def count_mentions(text: str, target: str) -> int:
@@ -229,12 +256,18 @@ def count_elements(content_list_path):
             return sum(1 for e in els if (e.get("page_idx") or 0) < appendix_page)
         return len(els)
 
+    # 脚注/章节计数（治 "how many footnotes/sections"）：脚注 = page_footnote 元素；
+    # 章节 = 一级标题（text_level==1）个数。content_list 字段直接可数，纯加法。
+    footnotes = sum(1 for it in items if it.get("type") == "page_footnote")
+    sections = sum(1 for it in items if it.get("text_level") == 1)
     return {
         "figures": cnt("image"),
         "tables": cnt("table"),
         "equations": cnt("equation"),
         "figures_body": cnt("image", body_only=True),
         "tables_body": cnt("table", body_only=True),
+        "footnotes": footnotes,
+        "sections": sections,
     }
 
 
@@ -279,6 +312,11 @@ def format_stats_note(stats: dict) -> str:
             f"(excluding appendix/references: {fb}); tables = {stats['tables']} "
             f"(excluding appendix: {tb}); equations = {stats['equations']}"
         )
+        if "footnotes" in stats:  # 脚注/章节计数（与元素计数同源于 content_list）
+            parts.append(
+                f"footnote elements = {stats['footnotes']}; "
+                f"level-1 section headings = {stats['sections']}"
+            )
     return (
         "[Supplementary document statistics, computed programmatically from the PDF: "
         + "; ".join(parts)

@@ -26,7 +26,13 @@ def test_mention_count():
     assert detect_mention_count_intent(q)
     assert extract_mention_target(q) == "net working capital"
     assert not detect_mention_count_intent("How many pages does the document have?")
-    # 无引号目标不抽（边界模糊宁可不处理）
+    # 放宽：无引号专名/短语（句尾）现在能抽
+    assert extract_mention_target("How many times does the paper mention WikiText-2?") == "WikiText-2"
+    assert (extract_mention_target("How many times does the report mention the name of Global reinsurance?")
+            == "Global reinsurance")
+    # "how many time"（无 s 笔误）也识别
+    assert detect_mention_count_intent("How many time does the paper mention WikiText-2?")
+    # 目标在 mention 之前（被动语态）仍抽不到 → None（宁可不处理）
     assert extract_mention_target("how many times is revenue mentioned") is None
     # 计数不区分大小写
     txt = "Revenue grew. The REVENUE target. revenue again."
@@ -134,6 +140,9 @@ def test_count_elements(tmp_path):
         {"type": "image", "page_idx": 1},
         {"type": "image", "page_idx": 2},
         {"type": "table", "page_idx": 3},
+        {"type": "text", "text_level": 1, "text": "1 Introduction", "page_idx": 0},
+        {"type": "page_footnote", "page_idx": 1},
+        {"type": "page_footnote", "page_idx": 2},
         {"type": "text", "text_level": 1, "text": "References", "page_idx": 5},
         {"type": "image", "page_idx": 6},   # 附录里的图,不算 body
         {"type": "equation", "page_idx": 2},
@@ -141,4 +150,6 @@ def test_count_elements(tmp_path):
     r = count_elements(p)
     assert r["figures"] == 3 and r["tables"] == 1 and r["equations"] == 1
     assert r["figures_body"] == 2   # 排除 References(page5) 之后的图
+    assert r["footnotes"] == 2      # 两个 page_footnote 元素
+    assert r["sections"] == 2       # 两个一级标题(Introduction / References)
     assert count_elements(tmp_path / "missing.json") is None
