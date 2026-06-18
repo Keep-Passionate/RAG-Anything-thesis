@@ -64,7 +64,7 @@ def detect_meta_intent(question: str) -> bool:
 # 在 query.py 里覆盖避让门（归因实锤：'how many figures excluding appendix' 曾因此丢分）。
 _COUNT_RE = re.compile(
     r"how\s+many\s+(?:figures?|images?|tables?|equations?|charts?|pictures?|"
-    r"illustrations?|footnotes?|sections?)",
+    r"illustrations?)",
     re.IGNORECASE,
 )
 _COUNT_KWS_ZH = ("几张图", "多少张图", "几幅图", "几个表", "多少个表", "几个公式", "多少个公式")
@@ -256,18 +256,15 @@ def count_elements(content_list_path):
             return sum(1 for e in els if (e.get("page_idx") or 0) < appendix_page)
         return len(els)
 
-    # 脚注/章节计数（治 "how many footnotes/sections"）：脚注 = page_footnote 元素；
-    # 章节 = 一级标题（text_level==1）个数。content_list 字段直接可数，纯加法。
-    footnotes = sum(1 for it in items if it.get("type") == "page_footnote")
-    sections = sum(1 for it in items if it.get("text_level") == 1)
+    # 注：脚注/章节计数（page_footnote / text_level==1）曾在此实现，但实测对
+    # "how many sections (excluding subsections)" 数错（一级标题 ≠ 金标 section 口径），
+    # 净增益为负，已移除（见论文第 6 章计数补全的诚实负向）；仅保留可靠的图/表/公式计数。
     return {
         "figures": cnt("image"),
         "tables": cnt("table"),
         "equations": cnt("equation"),
         "figures_body": cnt("image", body_only=True),
         "tables_body": cnt("table", body_only=True),
-        "footnotes": footnotes,
-        "sections": sections,
     }
 
 
@@ -312,11 +309,6 @@ def format_stats_note(stats: dict) -> str:
             f"(excluding appendix/references: {fb}); tables = {stats['tables']} "
             f"(excluding appendix: {tb}); equations = {stats['equations']}"
         )
-        if "footnotes" in stats:  # 脚注/章节计数（与元素计数同源于 content_list）
-            parts.append(
-                f"footnote elements = {stats['footnotes']}; "
-                f"level-1 section headings = {stats['sections']}"
-            )
     return (
         "[Supplementary document statistics, computed programmatically from the PDF: "
         + "; ".join(parts)

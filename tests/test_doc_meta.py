@@ -150,6 +150,6 @@ def test_count_elements(tmp_path):
     r = count_elements(p)
     assert r["figures"] == 3 and r["tables"] == 1 and r["equations"] == 1
     assert r["figures_body"] == 2   # 排除 References(page5) 之后的图
-    assert r["footnotes"] == 2      # 两个 page_footnote 元素
-    assert r["sections"] == 2       # 两个一级标题(Introduction / References)
+    # 脚注/章节计数已移除（实测对 "how many sections" 数错、净负），故不再断言
+    assert "footnotes" not in r and "sections" not in r
     assert count_elements(tmp_path / "missing.json") is None
