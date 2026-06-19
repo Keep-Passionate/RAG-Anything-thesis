@@ -1,0 +1,3 @@
+{"question": "Was the newspaper released on weekdays?", "answer": "Yes.", "type": "meta-data", "evidence": ""}
+{"question": "What is the brief summary of the New York Poverty news?", "answer": "New York City's poverty rate soared to 23% in 2022, its largest increase in a decade, with children being disproportionately affected as one in four now live in poverty. This alarming rise follows the end of expanded government aid programs that previously mitigated the impacts of the pandemic, job losses, and economic factors.", "type": "meta-data", "evidence": ""}
+{"question": "Which city is predicted to have the largest drop in office worker spending due to the shift to hybrid work?", "answer": "Not mentioned.", "type": "unanswerable", "evidence": ""}

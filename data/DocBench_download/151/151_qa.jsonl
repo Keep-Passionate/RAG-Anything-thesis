@@ -1,0 +1,5 @@
+{"question": "Is the corporate income tax rate in Brazil 15%?", "answer": "Yes.", "type": "text-only", "evidence": "The text states \"The corporate income tax rate is 15%.\""}
+{"question": "What is the capital gains tax rate for individuals who are in a higher income tax bracket?", "answer": "The capital gains tax rate for individuals in a higher rate income tax bracket or above is 20%.", "type": "text-only", "evidence": "\"Individuals in a higher rate (currently 40%) income tax bracket or above are charged a 20% capital gains tax.\""}
+{"question": "How many countries have signed bilateral investment treaties (BITs) with Iran?", "answer": "70 countries.", "type": "text-only", "evidence": "\"...bilateral investment treaties (BITs) with 70 countries...\""}
+{"question": "How many times does the document mention \"value-added tax\"?", "answer": "23.", "type": "meta-data", "evidence": ""}
+{"question": "When was the document revised?", "answer": "Not mentioned.", "type": "unanswerable", "evidence": ""}

@@ -1,0 +1,4 @@
+{"question": "Which publication is Maureen Dowd associated with?", "answer": "SUNDAY REVIEW.", "type": "text-only", "evidence": "Maureen Dowd PAGE 9 SUNDAY REVIEW"}
+{"question": "Was the newspaper released on weekends?", "answer": "Yes.", "type": "meta-data", "evidence": ""}
+{"question": "How many figures are there in the document?", "answer": "3.", "type": "meta-data", "evidence": ""}
+{"question": "Has there been a clash between local police and state troopers in Austin, Texas?", "answer": "Not mentioned.", "type": "unanswerable", "evidence": ""}
