@@ -69,11 +69,22 @@ _COUNT_RE = re.compile(
 )
 _COUNT_KWS_ZH = ("几张图", "多少张图", "几幅图", "几个表", "多少个表", "几个公式", "多少个公式")
 
+# p_dsg2 消融开关：计数补全（章节/脚注计数）。实测对 "how many sections (excluding
+# subsections)" 易数错（一级标题 ≠ 金标 section 口径）、净负，已从主线移除；保留为开关
+# 仅供"是否该做计数补全"的【同样本对照实验】：ENABLE_SECTION_COUNT=true 即复现旧 p_dsg2。
+_COUNT_SECTION_RE = re.compile(r"how\s+many\s+(?:sections?|footnotes?)", re.IGNORECASE)
+
+
+def _section_count_on() -> bool:
+    return os.getenv("ENABLE_SECTION_COUNT", "").strip().lower() in ("1", "true", "yes", "on")
+
 
 def detect_count_intent(question: str) -> bool:
-    """问题是否在数"文档里有几张图/几个表/几个公式"。"""
+    """问题是否在数"文档里有几张图/几个表/几个公式"（开 ENABLE_SECTION_COUNT 时另识别几节/几脚注）。"""
     q = question or ""
-    return bool(_COUNT_RE.search(q)) or any(k in q for k in _COUNT_KWS_ZH)
+    if bool(_COUNT_RE.search(q)) or any(k in q for k in _COUNT_KWS_ZH):
+        return True
+    return bool(_section_count_on() and _COUNT_SECTION_RE.search(q))
 
 
 # v3：页码引用（"summary of page 20" / "第 7 页"）。识别出具体页码后，
@@ -256,16 +267,20 @@ def count_elements(content_list_path):
             return sum(1 for e in els if (e.get("page_idx") or 0) < appendix_page)
         return len(els)
 
-    # 注：脚注/章节计数（page_footnote / text_level==1）曾在此实现，但实测对
-    # "how many sections (excluding subsections)" 数错（一级标题 ≠ 金标 section 口径），
-    # 净增益为负，已移除（见论文第 6 章计数补全的诚实负向）；仅保留可靠的图/表/公式计数。
-    return {
+    # 注：脚注/章节计数（page_footnote / text_level==1）实测对 "how many sections
+    # (excluding subsections)" 数错（一级标题 ≠ 金标 section 口径）、净负，已从主线移除；
+    # 仅在 ENABLE_SECTION_COUNT 开时复现（供 p_dsg2 同样本对照消融，见论文第 6 章诚实负向）。
+    result = {
         "figures": cnt("image"),
         "tables": cnt("table"),
         "equations": cnt("equation"),
         "figures_body": cnt("image", body_only=True),
         "tables_body": cnt("table", body_only=True),
     }
+    if _section_count_on():
+        result["footnotes"] = sum(1 for it in items if it.get("type") == "page_footnote")
+        result["sections"] = sum(1 for it in items if it.get("text_level") == 1)
+    return result
 
 
 def extract_page_text(pdf_path: str, page_no: int, max_chars: int = 1200) -> str:
@@ -308,6 +323,11 @@ def format_stats_note(stats: dict) -> str:
             f"parsed element counts: figures = {stats['figures']} "
             f"(excluding appendix/references: {fb}); tables = {stats['tables']} "
             f"(excluding appendix: {tb}); equations = {stats['equations']}"
+        )
+    if "sections" in stats:  # ENABLE_SECTION_COUNT（p_dsg2 计数补全消融）开时才注入
+        parts.append(
+            f"number of top-level sections (excluding subsections) = {stats['sections']}; "
+            f"number of footnotes = {stats['footnotes']}"
         )
     return (
         "[Supplementary document statistics, computed programmatically from the PDF: "
