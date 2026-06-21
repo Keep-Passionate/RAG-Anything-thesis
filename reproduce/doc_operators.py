@@ -1,0 +1,140 @@
+"""doc_operators.py —— 确定性接地的【工具库】重构（与现有 doc_meta/doc_locate 并行存在）。
+
+把散落在 query.py 里的 if/elif 路由 + doc_meta/doc_locate 的函数，重构成
+【统一接口的算子注册表 + 一个调度器】，演示 L1/L2/L3 三层解耦：
+
+    算子 Operator = (name, desc, detect[L1], run[L2+L3])
+    注册表 OPERATORS（按优先级）
+    调度器 dispatch(question, ctx) -> (注入文本, 命中算子名列表)
+
+设计要点：
+- 【不改变任何现有行为】：算子的实现【复用】doc_meta/doc_locate 的现成函数；
+  query.py 暂不接它（保留原关键词路由）。这是"重建一版、并行存在、A/B 后择优"的并行实现。
+- L1 路由现仍是关键词（每个算子自带 detect）；将来把 dispatch 换成【神经路由】
+  （function-calling：把各算子的 .desc 喂给 LLM 选调哪个）即可，L2/L3 一行不动。
+- 与 query.py 的等价性：mention/element/meta 三选一（互斥、优先级递减），locate 可叠加。
+"""
+from dataclasses import dataclass, field
+from typing import Callable, List, Optional
+
+import doc_locate as dl
+import doc_meta as dm
+
+
+@dataclass
+class Ctx:
+    """阶段A 每篇文档只算一次的缓存；kw_visual/kw_table 是【每题】的视觉意图，调度前由调用方刷新。"""
+    pdf_path: str
+    doc_stats: Optional[dict] = None   # dm.compute_doc_stats(pdf) 的结果（页/词/缩写/图表/_text）
+    locate_index: str = ""             # dl.build_heading_page_index(pdf) 的结果
+    kw_visual: bool = False
+    kw_table: bool = False
+
+
+@dataclass
+class Operator:
+    name: str
+    desc: str                          # 给（未来）神经路由 / function-calling 看的自描述
+    detect: Callable                   # L1: (question, ctx) -> bool
+    run: Callable                      # L2+L3: (question, ctx) -> 注入文本 str（""=放弃）
+    stackable: bool = False            # True=可与统计类叠加（locate）；False=统计类三选一
+
+
+# ---------------------------------------------------------------------------
+# 各算子的 L1 detect + L2/L3 run —— 全部【复用】 doc_meta / doc_locate，不重写逻辑
+# ---------------------------------------------------------------------------
+
+def _mention_detect(q, ctx):
+    return bool(ctx.doc_stats) and dm.detect_mention_count_intent(q) \
+        and dm.extract_mention_target(q) is not None
+
+
+def _mention_run(q, ctx):
+    target = dm.extract_mention_target(q)
+    n = dm.count_mentions(ctx.doc_stats.get("_text", ""), target)
+    return (f'[Programmatically verified: the phrase "{target}" appears '
+            f"{n} times in the document text.]")
+
+
+def _elemcount_detect(q, ctx):
+    return bool(ctx.doc_stats) and dm.detect_count_intent(q)
+
+
+def _meta_detect(q, ctx):
+    return bool(ctx.doc_stats) and dm.detect_meta_intent(q) \
+        and not (ctx.kw_visual or ctx.kw_table)
+
+
+def _stats_run(q, ctx):
+    """element_count 与 meta_stats 共用：拼统计量说明，并对点名页追加该页开头文本。"""
+    note = dm.format_stats_note(ctx.doc_stats)
+    page_no = dm.find_page_reference(q)
+    if page_no:
+        snip = dm.extract_page_text(ctx.pdf_path, page_no)
+        if snip:
+            note += (f"\n[Beginning of page {page_no}, extracted "
+                     f"programmatically: {snip}]")
+    return note
+
+
+def _locate_detect(q, ctx):
+    return bool(ctx.locate_index) and dl.detect_location_intent(q)
+
+
+def _locate_run(q, ctx):
+    return dl.format_locate_note(ctx.locate_index)
+
+
+# ---------------------------------------------------------------------------
+# 注册表（顺序 = 优先级，与 query.py 的 if/elif 一致）
+# ---------------------------------------------------------------------------
+OPERATORS: List[Operator] = [
+    Operator("mention_count", "数某个词/短语在全文出现多少次", _mention_detect, _mention_run),
+    Operator("element_count", "数文档里有几张图/表/公式（可排除附录）", _elemcount_detect, _stats_run),
+    Operator("meta_stats", "页数/词数/最高频词/最常见缩写/某页内容等全局统计量",
+             _meta_detect, _stats_run),
+    Operator("locate", "某章节/内容在第几页（标题→页码索引）",
+             _locate_detect, _locate_run, stackable=True),
+]
+
+
+def dispatch(question: str, ctx: Ctx):
+    """按优先级跑注册表，返回 (拼好的注入文本, 命中算子名列表)。
+
+    统计类（非 stackable）三选一取第一个命中；stackable 的（locate）独立叠加。
+    与 query.py 现有路由等价。
+    """
+    notes, fired = [], []
+    statistics_done = False
+    for op in OPERATORS:
+        if op.stackable:
+            if op.detect(question, ctx):
+                notes.append(op.run(question, ctx))
+                fired.append(op.name)
+        elif not statistics_done and op.detect(question, ctx):
+            notes.append(op.run(question, ctx))
+            fired.append(op.name)
+            statistics_done = True
+    return "\n\n".join(n for n in notes if n), fired
+
+
+def build_ctx(pdf_path: str, kw_visual: bool = False, kw_table: bool = False) -> Ctx:
+    """阶段A：每篇文档只算一次（贵活）。kw_* 可调度前每题再刷新。"""
+    return Ctx(
+        pdf_path=pdf_path,
+        doc_stats=dm.compute_doc_stats(pdf_path),
+        locate_index=dl.build_heading_page_index(pdf_path),
+        kw_visual=kw_visual,
+        kw_table=kw_table,
+    )
+
+
+if __name__ == "__main__":
+    print("确定性接地 · 算子注册表（L1 detect / L2+L3 run，复用 doc_meta/doc_locate）：")
+    for op in OPERATORS:
+        tag = "（可叠加）" if op.stackable else "（统计类三选一）"
+        print(f"  - {op.name:14s}{tag}: {op.desc}")
+    print("\n调度优先级：mention_count > element_count > meta_stats（三选一）；locate 独立叠加。")
+    print("用法：ctx = build_ctx(pdf); ctx.kw_visual,ctx.kw_table = detect_visual_intent(q); "
+          "note, fired = dispatch(q, ctx)")
+    print("未来：把 dispatch 换成神经路由（function-calling，喂各算子 .desc），L2/L3 不动。")
