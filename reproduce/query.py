@@ -283,6 +283,14 @@ async def process_with_rag(
             else:
                 logger.warning("ENABLE_DOC_LOCATE: no content_list/headings, notes disabled")
 
+        # 工具库路由（ENABLE_OPERATOR_LAYER）：用 doc_operators.dispatch 统一调度 DSG+Locate，
+        # 复用上面已算好的 doc_stats / locate_index（不重复计算）。默认关=走下面原关键词路由（可一键回退）。
+        op_ctx = None
+        if env_on("ENABLE_OPERATOR_LAYER"):
+            from doc_operators import Ctx
+            op_ctx = Ctx(pdf_path=file_path, doc_stats=doc_stats, locate_index=locate_index or "")
+            logger.info("Operator layer ENABLED: routing via doc_operators.dispatch")
+
         results = []
         for query in queries:
             q = query["question"]
@@ -300,33 +308,45 @@ async def process_with_rag(
             # 一并给模型——"第 N 页讲什么"从猜变成读；N 越界则只有 total pages 兜底。
             q_llm = q
             meta_used = False
-            # v4 关键词计数（"X 出现多少次"）优先——程序精确数指定词，避让门不挡它
-            mention_target = (
-                extract_mention_target(q)
-                if (doc_stats and detect_mention_count_intent(q)) else None
-            )
-            if mention_target:
-                n = count_mentions(doc_stats.get("_text", ""), mention_target)
-                q_llm = (
-                    f'{q}\n\n[Programmatically verified: the phrase "{mention_target}" '
-                    f"appears {n} times in the document text.]"
+            locate_used = False
+            if op_ctx is not None:
+                # —— 工具库路由：一次 dispatch 搞定 DSG(mention/element/meta) + Locate ——
+                from doc_operators import dispatch
+                op_ctx.kw_visual, op_ctx.kw_table = kw_visual, kw_table
+                _note, _fired = dispatch(q, op_ctx)
+                if _note:
+                    q_llm = f"{q}\n\n{_note}"
+                meta_used = any(f in ("mention_count", "element_count", "meta_stats") for f in _fired)
+                locate_used = "locate" in _fired
+            else:
+                # —— 原关键词路由（op 层关时走这里，与工具库等价）——
+                # v4 关键词计数（"X 出现多少次"）优先——程序精确数指定词，避让门不挡它
+                mention_target = (
+                    extract_mention_target(q)
+                    if (doc_stats and detect_mention_count_intent(q)) else None
                 )
-                meta_used = True
-            elif doc_stats and (
-                detect_count_intent(q)
-                or (detect_meta_intent(q) and not (kw_visual or kw_table))
-            ):
-                note = format_stats_note(doc_stats)
-                page_no = find_page_reference(q)
-                if page_no:
-                    snippet = extract_page_text(file_path, page_no)
-                    if snippet:
-                        note += (
-                            f"\n[Beginning of page {page_no}, extracted "
-                            f"programmatically: {snippet}]"
-                        )
-                q_llm = f"{q}\n\n{note}"
-                meta_used = True
+                if mention_target:
+                    n = count_mentions(doc_stats.get("_text", ""), mention_target)
+                    q_llm = (
+                        f'{q}\n\n[Programmatically verified: the phrase "{mention_target}" '
+                        f"appears {n} times in the document text.]"
+                    )
+                    meta_used = True
+                elif doc_stats and (
+                    detect_count_intent(q)
+                    or (detect_meta_intent(q) and not (kw_visual or kw_table))
+                ):
+                    note = format_stats_note(doc_stats)
+                    page_no = find_page_reference(q)
+                    if page_no:
+                        snippet = extract_page_text(file_path, page_no)
+                        if snippet:
+                            note += (
+                                f"\n[Beginning of page {page_no}, extracted "
+                                f"programmatically: {snippet}]"
+                            )
+                    q_llm = f"{q}\n\n{note}"
+                    meta_used = True
 
             # doc_outline：结构/前页题注入"提取的结构信息"（章节树 / 首页 footer）。
             # 与 DSG 独立、可叠加；意图互斥时一般只有一个触发。
@@ -352,8 +372,8 @@ async def process_with_rag(
 
             # doc_locate：问"X 在第几页"的题，注入"章节标题→页码"索引（Localization）。
             # 与 DSG/outline/anchor 独立、纯加法；无标题索引则不注入（对 baseline 零风险）。
-            locate_used = False
-            if locate_index and detect_location_intent(q):
+            # op 层开时 locate 已在上面的 dispatch 内处理，这里只在 op 层关时走原路由。
+            if op_ctx is None and locate_index and detect_location_intent(q):
                 lnote = format_locate_note(locate_index)
                 if lnote:
                     q_llm = f"{q_llm}\n\n{lnote}"
