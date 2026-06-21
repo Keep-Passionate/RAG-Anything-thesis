@@ -183,6 +183,21 @@ def text_stats(text: str) -> dict:
     }
 
 
+def _wordcount_parsed_on() -> bool:
+    return os.getenv("ENABLE_WORDCOUNT_PARSED", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _wordcount_from_content_list(content_list_path) -> int:
+    """ENABLE_WORDCOUNT_PARSED：从 MinerU content_list 正文数词数（可能与金标口径更接近，A/B 验证）。"""
+    try:
+        with open(content_list_path, encoding="utf-8") as f:
+            items = json.load(f)
+        txt = " ".join(str(it.get("text", "")) for it in items if isinstance(it, dict))
+        return len(txt.split())
+    except Exception:
+        return 0
+
+
 def compute_doc_stats(pdf_path: str):
     """读 PDF 计算统计量。PyMuPDF 优先（MinerU 自带），pypdf 兜底；都失败返回 None。
 
@@ -212,6 +227,10 @@ def compute_doc_stats(pdf_path: str):
         elements = count_elements(cl)
         if elements:
             stats.update(elements)
+        if _wordcount_parsed_on():  # 词数另一口径：从解析正文数（默认关，A/B 验证哪个更贴金标）
+            wc = _wordcount_from_content_list(cl)
+            if wc:
+                stats["words"] = wc
     return stats
 
 
@@ -301,6 +320,48 @@ def extract_page_text(pdf_path: str, page_no: int, max_chars: int = 1200) -> str
         return " ".join(text.split())[:max_chars]
     except Exception:
         return ""
+
+
+# ---------------------------------------------------------------------------
+# 相对页（ENABLE_PAGE_RELATIVE）：把"最后一页 / 前 N 页 / 倒数第二页 / 首页"解析成具体页号，
+# 注入这些页开头文本。治"main content of the last page / final page / page 23 之外的相对页"题。
+# ---------------------------------------------------------------------------
+_REL_2NDLAST_RE = re.compile(r"\bsecond[-\s]to[-\s]last\s+page\b", re.IGNORECASE)
+_REL_LAST_RE = re.compile(r"\b(?:the\s+)?(?:last|final)\s+(?:(\d+)\s+)?pages?\b", re.IGNORECASE)
+_REL_FRONT_RE = re.compile(r"\b(?:front\s*page|first\s+page|cover\s+page|frontpage)\b", re.IGNORECASE)
+
+
+def _page_relative_on() -> bool:
+    return os.getenv("ENABLE_PAGE_RELATIVE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def resolve_relative_pages(question: str, total_pages: int):
+    """'last/final/front/second-to-last/last N pages' → 具体页号列表（1 起算）；无则 []。"""
+    q = question or ""
+    if not total_pages:
+        return []
+    if _REL_2NDLAST_RE.search(q):
+        return [total_pages - 1] if total_pages >= 2 else [total_pages]
+    m = _REL_LAST_RE.search(q)
+    if m:
+        n = int(m.group(1)) if m.group(1) else 1
+        n = max(1, min(n, total_pages))
+        return list(range(total_pages - n + 1, total_pages + 1))
+    if _REL_FRONT_RE.search(q):
+        return [1]
+    return []
+
+
+def relative_page_note(pdf_path: str, question: str, total_pages: int) -> str:
+    """ENABLE_PAGE_RELATIVE：对'最后一页/前N页/首页'等相对页，注入这些页开头文本。关/无匹配→''。"""
+    if not _page_relative_on():
+        return ""
+    parts = []
+    for p in resolve_relative_pages(question, total_pages)[:3]:  # 最多 3 页，控长
+        snip = extract_page_text(pdf_path, p)
+        if snip:
+            parts.append(f"[Beginning of page {p} (programmatically extracted): {snip}]")
+    return "\n".join(parts)
 
 
 def format_stats_note(stats: dict) -> str:

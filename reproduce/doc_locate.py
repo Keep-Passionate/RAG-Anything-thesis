@@ -117,3 +117,72 @@ def format_locate_note(index_text: str) -> str:
         "document. Use it to answer on-which-page questions (pages are physical, 1-based):\n"
         f"{index_text}]"
     )
+
+
+# ===========================================================================
+# 内容定位器（ENABLE_LOCATE_CONTENT）：补"非标题"定位——搜元素正文/图表标题里的目标关键词→返回页
+# 治"France/Asia/签名/执行官/独立董事 在第几页"这类目标不是章节标题、Locate 标题表够不着的题。
+# 保守：抽不到清晰目标就放弃、只给候选页让模型自选、独立开关可回退。
+# ===========================================================================
+_LOC_TARGET_RES = [
+    re.compile(r"\binformation\s+(?:about|of|on)\s+(.+?)\s*[\?\.!]*\s*$", re.IGNORECASE),
+    re.compile(r"\bsituations?\s+of\s+(.+?)\s*[\?\.!]*\s*$", re.IGNORECASE),
+    re.compile(r"\babout\s+(.+?)\s*[\?\.!]*\s*$", re.IGNORECASE),
+    re.compile(r"\b(?:presents?|details?|lists?|discuss(?:es)?|introduces?|outlines?|"
+               r"reports?)\s+(?:the\s+)?(.+?)\s*(?:section|part)?\s*[\?\.!]*\s*$", re.IGNORECASE),
+    re.compile(r"\bpage\s+(?:of|for)\s+(?:the\s+)?['\"]?(.+?)['\"]?\s*(?:section)?\s*[\?\.!]*\s*$",
+               re.IGNORECASE),
+]
+_LOC_REJECT = re.compile(r"^(it|them|this|that|these|those|the\s+(document|report|paper))\b",
+                         re.IGNORECASE)
+
+
+def _content_locate_on() -> bool:
+    return os.getenv("ENABLE_LOCATE_CONTENT", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def extract_location_target(question: str):
+    """从'X 在第几页'类问题抽出要定位的内容关键词；抽不到/太模糊则 None（保守）。"""
+    q = question or ""
+    for rx in _LOC_TARGET_RES:
+        m = rx.search(q)
+        if m:
+            t = " ".join(m.group(1).split()).strip(" '\"‘’“”")
+            if 2 <= len(t) <= 50 and len(t.split()) <= 6 and not _LOC_REJECT.match(t):
+                return t
+    return None
+
+
+def content_locate_note(pdf_path: str, question: str, max_pages: int = 6) -> str:
+    """ENABLE_LOCATE_CONTENT：在 content_list 所有元素正文 + 图表标题里搜目标关键词，
+    返回'目标 出现在第 N、M 页'的候选注入。关 / 无 content_list / 抽不到目标 / 没搜到 → ''。"""
+    if not _content_locate_on():
+        return ""
+    target = extract_location_target(question)
+    if not target:
+        return ""
+    try:
+        from doc_meta import locate_content_list  # 复用解析定位
+        cl = locate_content_list(pdf_path)
+        if not cl:
+            return ""
+        with open(cl, encoding="utf-8") as f:
+            items = json.load(f)
+    except Exception:
+        return ""
+    tl = target.lower()
+    pages = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        blob = (str(it.get("text", "")) + " " + _caption_of(it)).lower()
+        pg = it.get("page_idx")
+        if isinstance(pg, int) and tl in blob and (pg + 1) not in pages:
+            pages.append(pg + 1)
+        if len(pages) >= max_pages:
+            break
+    if not pages:
+        return ""
+    plist = ", ".join(str(p) for p in sorted(pages))
+    return (f'[Content locator (programmatic): the text "{target}" appears on '
+            f"page(s) {plist} (physical, 1-based); use it to answer on-which-page questions.]")

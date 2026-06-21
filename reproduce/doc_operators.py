@@ -66,7 +66,7 @@ def _meta_detect(q, ctx):
 
 
 def _stats_run(q, ctx):
-    """element_count 与 meta_stats 共用：拼统计量说明，并对点名页追加该页开头文本。"""
+    """element_count 与 meta_stats 共用：拼统计量说明 + 点名页 + 相对页（末页/前N页，自门控）。"""
     note = dm.format_stats_note(ctx.doc_stats)
     page_no = dm.find_page_reference(q)
     if page_no:
@@ -74,15 +74,23 @@ def _stats_run(q, ctx):
         if snip:
             note += (f"\n[Beginning of page {page_no}, extracted "
                      f"programmatically: {snip}]")
+    rel = dm.relative_page_note(ctx.pdf_path, q, (ctx.doc_stats or {}).get("pages"))
+    if rel:
+        note += "\n" + rel
     return note
 
 
 def _locate_detect(q, ctx):
-    return bool(ctx.locate_index) and dl.detect_location_intent(q)
+    # 有标题索引就触发；内容定位器开时即便没标题索引也触发（让它去搜正文/图表标题）
+    return dl.detect_location_intent(q) and (bool(ctx.locate_index) or dl._content_locate_on())
 
 
 def _locate_run(q, ctx):
-    return dl.format_locate_note(ctx.locate_index)
+    note = dl.format_locate_note(ctx.locate_index)          # 标题→页码（+ENABLE_LOCATE_ELEMENTS 的表/图）
+    extra = dl.content_locate_note(ctx.pdf_path, q)         # 内容定位器（自门控 ENABLE_LOCATE_CONTENT）
+    if extra:
+        note = (note + "\n" + extra) if note else extra
+    return note
 
 
 # ---------------------------------------------------------------------------
