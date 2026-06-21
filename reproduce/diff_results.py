@@ -74,13 +74,68 @@ def load_flags(qa_dir, doc_map, method, doc_id, q_normed):
                 if norm(rec.get("question")) == q_normed:
                     return {
                         k: rec[k]
-                        for k in ("doc_meta_used", "outline_used", "anchor_used",
-                                  "ncg_used", "vlm_used", "vlm_trigger", "rr_triggered")
+                        for k in ("doc_meta_used", "locate_used", "outline_used",
+                                  "anchor_used", "ncg_used", "vlm_used", "vlm_trigger",
+                                  "rr_triggered")
                         if k in rec
                     }
     except Exception:
         pass
     return {}
+
+
+def _triggered(flags):
+    """B 的程序（DSG 或 Locate）是否在这题真开火。"""
+    return bool(flags.get("doc_meta_used")) or bool(flags.get("locate_used"))
+
+
+def print_breakdown(common, a_acc, b_acc, qa_dir, doc_map, method_b, q2type):
+    """机制贡献分解：把共同题按【是否被程序触发】×【对错/翻转】分类，给数量与占比。
+
+    用途：证明增益集中在"触发∩翻对"（真信号），而非"未触发∩翻转"（温度噪声）；
+    并把"触发∩答错"逐题列出 = 方法的边界/瓶颈。
+    """
+    N = len(common)
+    T = Tc = Tw = up = down = notT_flip = 0
+    Tw_qs = []
+    trig_type = defaultdict(int)
+    for key in common:
+        va, vb = a_acc[key], b_acc[key]
+        trig = _triggered(load_flags(qa_dir, doc_map, method_b, key[0], key[1]))
+        flip = va != vb
+        if trig:
+            T += 1
+            trig_type[q2type.get(key[1], "?")] += 1
+            if vb == 1:
+                Tc += 1
+            else:
+                Tw += 1
+                Tw_qs.append(key)
+            if flip and vb > va:
+                up += 1
+            elif flip and vb < va:
+                down += 1
+        elif flip:
+            notT_flip += 1
+
+    def pct(x, base):
+        return f"{100 * x / base:.1f}%" if base else "—"
+
+    print(f"\n===== 机制贡献分解  B={method_b}  (共同题 {N}) =====")
+    print(f"触发数 T（程序开火）            = {T:4d}  ({pct(T, N)} of 全部)")
+    print(f"  ├ 触发∩答对                   = {Tc:4d}  ({pct(Tc, T)} of 触发)")
+    print(f"  └ 触发∩答错（边界/瓶颈）      = {Tw:4d}  ({pct(Tw, T)} of 触发)")
+    print(f"触发∩翻对（A错→B对，真赢回）   = {up:4d}  ({pct(up, N)} of 全部)")
+    print(f"触发∩翻错（A对→B错，帮倒忙）   = {down:4d}")
+    print(f"未触发∩翻转（纯温度噪声）       = {notT_flip:4d}")
+    print(f"机制净贡献（翻对 − 翻错）       = {up - down:+d}")
+    print(f"触发命中率（触发∩答对 / T）     = {pct(Tc, T)}")
+    print("\n触发题按题型（数量 / 占触发）:")
+    for t in sorted(trig_type):
+        print(f"  {t:<16} {trig_type[t]:3d}  ({pct(trig_type[t], T)})")
+    print(f"\n--- 触发∩答错（边界瓶颈，{len(Tw_qs)} 题）---")
+    for d, q in Tw_qs:
+        print(f"[doc {d}] ({q2type.get(q, '?')}) {q[:100]}")
 
 
 def main():
@@ -89,6 +144,8 @@ def main():
     ap.add_argument("--qa-dir", required=True, help="含 <id>/<id>_qa.jsonl 的目录")
     ap.add_argument("--a", required=True, help="基准 method（如 base_t0）")
     ap.add_argument("--b", required=True, help="对比 method（如 docmeta_v2）")
+    ap.add_argument("--breakdown", action="store_true",
+                    help="额外打印机制贡献分解表（触发/翻对/翻错/噪声 的数量与占比）")
     args = ap.parse_args()
 
     acc = load_eval(args.eval)
@@ -137,6 +194,9 @@ def main():
             ftxt = " ".join(f"{k}={v}" for k, v in flags.items()) or "(无标记)"
             print(f"[doc {d}] ({q2type.get(q, '?')}) {ftxt}")
             print(f"    {q[:110]}")
+
+    if args.breakdown:
+        print_breakdown(common, a_acc, b_acc, args.qa_dir, doc_map, args.b, q2type)
 
 
 if __name__ == "__main__":
