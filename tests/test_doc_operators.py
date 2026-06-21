@@ -5,7 +5,13 @@ from pathlib import Path
 # doc_operators 在 reproduce/（脚本目录，非包），手动加入路径
 sys.path.insert(0, str(Path(__file__).parent.parent / "reproduce"))
 
-from doc_operators import Ctx, dispatch  # noqa: E402
+from doc_operators import (  # noqa: E402
+    Ctx,
+    build_route_prompt,
+    dispatch,
+    neural_dispatch,
+    parse_route_response,
+)
 
 
 def _ctx():
@@ -51,3 +57,35 @@ def test_visual_suppresses_meta():
 def test_content_question_no_fire():
     note, fired = dispatch("What is the BLEU score of the model?", _ctx())
     assert not fired and note == ""
+
+
+# ---------------------------------------------------------------------------
+# 神经路由（function-calling）：route_fn 注入 mock LLM，验证选算子→确定性执行
+# ---------------------------------------------------------------------------
+
+def test_route_prompt_lists_tools():
+    p = build_route_prompt("How many pages?")
+    assert "mention_count" in p and "locate" in p and "Tools to call:" in p
+
+
+def test_parse_route_response():
+    assert parse_route_response("meta_stats") == ["meta_stats"]
+    assert parse_route_response("none") == []
+    # 多个 + 保持注册表优先级顺序
+    assert parse_route_response("locate, meta_stats") == ["meta_stats", "locate"]
+
+
+def test_neural_dispatch_meta():
+    note, fired = neural_dispatch("How many pages?", _ctx(), lambda p: "meta_stats")
+    assert "meta_stats" in fired and "total pages = 9" in note
+
+
+def test_neural_dispatch_none():
+    note, fired = neural_dispatch("What is the BLEU score?", _ctx(), lambda p: "none")
+    assert not fired and note == ""
+
+
+def test_neural_dispatch_locate_stacks():
+    note, fired = neural_dispatch("which page is future work", _ctx(),
+                                  lambda p: "meta_stats, locate")
+    assert "locate" in fired and "meta_stats" in fired

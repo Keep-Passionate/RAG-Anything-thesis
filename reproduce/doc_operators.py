@@ -127,6 +127,49 @@ def dispatch(question: str, ctx: Ctx, operators=None):
     return "\n\n".join(n for n in notes if n), fired
 
 
+# ---------------------------------------------------------------------------
+# 神经路由（function-calling）：用 LLM 决定调哪个算子，替代关键词 detect（只动 L1）。
+# route_fn(prompt)->LLM文本 由调用方注入（包装真实 LLM），便于单测（mock）；L2/L3 一行不改。
+# ---------------------------------------------------------------------------
+def build_route_prompt(question: str, operators=None) -> str:
+    """构造"给 LLM 选工具"的提示（把各算子的 name+desc 列出，让它选哪些适用）。"""
+    ops = operators if operators is not None else OPERATORS
+    tools = "\n".join(f"- {op.name}: {op.desc}" for op in ops)
+    return (
+        "You are a tool router for a single-document QA system. Given a question and the "
+        "available deterministic tools, decide which tool(s), if any, should be called to "
+        "compute a fact that helps answer it. Reply with ONLY the matching tool name(s) "
+        "separated by commas, or 'none'.\n\n"
+        f"Question: {question}\n\nTools:\n{tools}\n\nTools to call:"
+    )
+
+
+def parse_route_response(text: str, operators=None):
+    """把 LLM 回复解析成命中的合法算子名（按注册表优先级顺序；'none'/无名 → []）。"""
+    ops = operators if operators is not None else OPERATORS
+    t = (text or "").lower()
+    return [op.name for op in ops if op.name.lower() in t]
+
+
+def neural_dispatch(question: str, ctx: Ctx, route_fn, operators=None):
+    """神经路由调度：route_fn 选算子 → 确定性执行选中算子的 run（与关键词路由同样的互斥/叠加规则）。"""
+    ops = operators if operators is not None else OPERATORS
+    chosen = set(parse_route_response(route_fn(build_route_prompt(question, ops)), ops))
+    notes, fired = [], []
+    statistics_done = False
+    for op in ops:
+        if op.name not in chosen:
+            continue
+        if op.stackable:
+            notes.append(op.run(question, ctx))
+            fired.append(op.name)
+        elif not statistics_done:
+            notes.append(op.run(question, ctx))
+            fired.append(op.name)
+            statistics_done = True
+    return "\n\n".join(n for n in notes if n), fired
+
+
 # 扩展算子（语料级，未实现，留作大论文按同一接口注册）：
 #   Operator("extremum",  "跨文档最大/最小（哪份报告页数最多）", ...)
 #   Operator("sort",      "按属性排序（按页数给报告排序）",       ...)
@@ -161,8 +204,14 @@ class Augmenter:
 
     def augment(self, question: str, pdf_path: str,
                 kw_visual: bool = False, kw_table: bool = False):
-        """返回 (注入事实文本, 命中算子名列表)。注入文本为 '' 表示这题我们不处理（=原系统行为）。"""
+        """关键词路由：返回 (注入事实文本, 命中算子名列表)。''=这题不处理（=原系统行为）。"""
         return dispatch(question, self._ctx(pdf_path, kw_visual, kw_table), self.operators)
+
+    def augment_neural(self, question: str, pdf_path: str, route_fn,
+                       kw_visual: bool = False, kw_table: bool = False):
+        """神经路由：route_fn(prompt)->LLM文本 决定调哪些算子（替代关键词），L2/L3 不变。"""
+        return neural_dispatch(question, self._ctx(pdf_path, kw_visual, kw_table),
+                               route_fn, self.operators)
 
     def operators_spec(self):
         """自描述算子清单（给神经路由 / function-calling）。"""
