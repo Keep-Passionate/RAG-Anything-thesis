@@ -18,6 +18,7 @@
 """
 
 import json
+import os
 import re
 
 # "X 在第几页" 的两种问法：① on/at/from which|what page；② which page ... is/are/located/discuss
@@ -33,8 +34,30 @@ def detect_location_intent(question: str) -> bool:
     return bool(_LOC_RE.search(question or ""))
 
 
+def _locate_elements_on() -> bool:
+    """ENABLE_LOCATE_ELEMENTS：保守增强开关。开了才在标题外【追加】表/图/公式的页码行。"""
+    return os.getenv("ENABLE_LOCATE_ELEMENTS", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _caption_of(it: dict) -> str:
+    """尽量取元素的标题/说明文字（表/图 caption），取不到返回 ''。"""
+    for k in ("text", "img_caption", "table_caption", "caption"):
+        v = it.get(k)
+        if isinstance(v, list):
+            v = " ".join(str(x) for x in v)
+        if v:
+            return " ".join(str(v).split()).strip()
+    return ""
+
+
 def build_heading_page_index(pdf_path: str, max_items: int = 40, max_chars: int = 1500) -> str:
-    """读 content_list，构造"章节标题 → 物理页码"索引文本。找不到/无标题则返回 ''。"""
+    """读 content_list，构造"章节标题 → 物理页码"索引文本。找不到/无标题则返回 ''。
+
+    保守增强（仅当 ENABLE_LOCATE_ELEMENTS=true）：在标题之后【追加】表/图/公式的
+    "(类型 #序号) 标题 -> 页码"行，使"第一张表 / 图 2 / 某张表 在第几页"也能由模型查表作答。
+    —— 不放宽触发条件（detect_location_intent 不变）、不改默认输出（开关关时与原版逐字一致），
+       只是给模型【更全的参照表】、由模型自己对照，故不因放宽而引入新的误判（保守）。
+    """
     try:
         from doc_meta import locate_content_list  # 复用 DSG 的解析定位工具
 
@@ -46,16 +69,40 @@ def build_heading_page_index(pdf_path: str, max_items: int = 40, max_chars: int 
     except Exception:
         return ""
 
+    elements_on = _locate_elements_on()
+    if elements_on:
+        max_chars = 3000  # 放宽容量以容纳表/图行
+    head_prefix = "(section) " if elements_on else ""  # 关时与原版逐字一致（零回归）
+
     lines = []
-    for it in items:
+    for it in items:  # 1) 章节标题（原有逻辑不变）
         if not isinstance(it, dict) or not it.get("text_level"):
             continue
         txt = " ".join(str(it.get("text", "")).split()).strip()
         pg = it.get("page_idx")
         if txt and isinstance(pg, int):
-            lines.append(f'"{txt[:80]}" -> page {pg + 1}')
+            lines.append(f'{head_prefix}"{txt[:80]}" -> page {pg + 1}')
         if len(lines) >= max_items:
             break
+
+    if elements_on:  # 2) 表/图/公式（保守增强：只列确定的元素+序号，不做模糊猜测）
+        seq = {"table": 0, "image": 0, "equation": 0}
+        label = {"table": "table", "image": "figure", "equation": "equation"}
+        added = 0
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            t, pg = it.get("type"), it.get("page_idx")
+            if t not in seq or not isinstance(pg, int):
+                continue
+            seq[t] += 1
+            cap = _caption_of(it)
+            cap = f' "{cap[:60]}"' if cap else ""
+            lines.append(f'({label[t]} #{seq[t]}){cap} -> page {pg + 1}')
+            added += 1
+            if added >= max_items:
+                break
+
     if not lines:
         return ""
     return "\n".join(lines)[:max_chars]
