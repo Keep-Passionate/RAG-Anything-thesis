@@ -310,10 +310,16 @@ async def process_with_rag(
             meta_used = False
             locate_used = False
             if op_ctx is not None:
-                # —— 工具库路由：一次 dispatch 搞定 DSG(mention/element/meta) + Locate ——
+                # —— 工具库路由：dispatch 搞定 DSG(mention/element/meta) + Locate ——
                 from doc_operators import dispatch
                 op_ctx.kw_visual, op_ctx.kw_table = kw_visual, kw_table
-                _note, _fired = dispatch(q, op_ctx)
+                if env_on("ENABLE_NEURAL_ROUTING"):
+                    # 神经路由(function-calling)：LLM 选算子，再确定性执行（只动 L1，默认关可回退）
+                    from doc_operators import build_route_prompt, neural_dispatch
+                    _route_text = await llm_model_func(build_route_prompt(q), temperature=0)
+                    _note, _fired = neural_dispatch(q, op_ctx, lambda _p: _route_text)
+                else:
+                    _note, _fired = dispatch(q, op_ctx)
                 if _note:
                     q_llm = f"{q}\n\n{_note}"
                 meta_used = any(f in ("mention_count", "element_count", "meta_stats") for f in _fired)
