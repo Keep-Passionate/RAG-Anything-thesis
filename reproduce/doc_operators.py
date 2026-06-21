@@ -106,15 +106,16 @@ OPERATORS: List[Operator] = [
 ]
 
 
-def dispatch(question: str, ctx: Ctx):
+def dispatch(question: str, ctx: Ctx, operators=None):
     """按优先级跑注册表，返回 (拼好的注入文本, 命中算子名列表)。
 
     统计类（非 stackable）三选一取第一个命中；stackable 的（locate）独立叠加。
-    与 query.py 现有路由等价。
+    与 query.py 现有路由等价。operators 可传自定义算子集（默认全局 OPERATORS）。
     """
+    ops = operators if operators is not None else OPERATORS
     notes, fired = [], []
     statistics_done = False
-    for op in OPERATORS:
+    for op in ops:
         if op.stackable:
             if op.detect(question, ctx):
                 notes.append(op.run(question, ctx))
@@ -124,6 +125,49 @@ def dispatch(question: str, ctx: Ctx):
             fired.append(op.name)
             statistics_done = True
     return "\n\n".join(n for n in notes if n), fired
+
+
+# 扩展算子（语料级，未实现，留作大论文按同一接口注册）：
+#   Operator("extremum",  "跨文档最大/最小（哪份报告页数最多）", ...)
+#   Operator("sort",      "按属性排序（按页数给报告排序）",       ...)
+#   Operator("topk",      "取前 k（引用最高的 10 篇）",          ...)
+# —— 与 GlobalRAG 的 Counting/Extremum/Sorting/Top-k 对接；加它们 = 往注册表再 append，框架不变。
+
+
+class Augmenter:
+    """系统无关的【问题增强器】：给一个文档(PDF) + 问题，返回"要拼进生成提示的已验证事实"。
+
+    可插入【任意 RAG / 图 RAG】（HippoRAG / GraphRAG / LightRAG …）——**不碰它们的检索与建图**，
+    只在它们"生成答案前"对问题做增强。用法：
+
+        aug = Augmenter()
+        fact, fired = aug.augment(question, pdf_path)          # fact 可能为 ""
+        prompt = question + (("\\n\\n" + fact) if fact else "")
+        answer = your_graph_rag.generate(prompt, ...)          # 交给对方系统照常生成
+
+    每篇文档只算一次（缓存）。operators_spec() 返回自描述算子清单，供未来 function-calling 神经路由。
+    """
+
+    def __init__(self, operators=None):
+        self.operators = operators if operators is not None else OPERATORS
+        self._cache = {}  # pdf_path -> Ctx（每篇只算一次）
+
+    def _ctx(self, pdf_path: str, kw_visual: bool = False, kw_table: bool = False) -> Ctx:
+        if pdf_path not in self._cache:
+            self._cache[pdf_path] = build_ctx(pdf_path)
+        c = self._cache[pdf_path]
+        c.kw_visual, c.kw_table = kw_visual, kw_table
+        return c
+
+    def augment(self, question: str, pdf_path: str,
+                kw_visual: bool = False, kw_table: bool = False):
+        """返回 (注入事实文本, 命中算子名列表)。注入文本为 '' 表示这题我们不处理（=原系统行为）。"""
+        return dispatch(question, self._ctx(pdf_path, kw_visual, kw_table), self.operators)
+
+    def operators_spec(self):
+        """自描述算子清单（给神经路由 / function-calling）。"""
+        return [{"name": op.name, "description": op.desc, "stackable": op.stackable}
+                for op in self.operators]
 
 
 def build_ctx(pdf_path: str, kw_visual: bool = False, kw_table: bool = False) -> Ctx:
