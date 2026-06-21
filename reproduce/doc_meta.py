@@ -326,8 +326,13 @@ def extract_page_text(pdf_path: str, page_no: int, max_chars: int = 1200) -> str
 # 相对页（ENABLE_PAGE_RELATIVE）：把"最后一页 / 前 N 页 / 倒数第二页 / 首页"解析成具体页号，
 # 注入这些页开头文本。治"main content of the last page / final page / page 23 之外的相对页"题。
 # ---------------------------------------------------------------------------
+_NUMWORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+             "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
 _REL_2NDLAST_RE = re.compile(r"\bsecond[-\s]to[-\s]last\s+page\b", re.IGNORECASE)
-_REL_LAST_RE = re.compile(r"\b(?:the\s+)?(?:last|final)\s+(?:(\d+)\s+)?pages?\b", re.IGNORECASE)
+_REL_LAST_RE = re.compile(
+    r"\b(?:the\s+)?(?:last|final)\s+"
+    r"(?:(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?pages?\b",
+    re.IGNORECASE)
 _REL_FRONT_RE = re.compile(r"\b(?:front\s*page|first\s+page|cover\s+page|frontpage)\b", re.IGNORECASE)
 
 
@@ -344,7 +349,8 @@ def resolve_relative_pages(question: str, total_pages: int):
         return [total_pages - 1] if total_pages >= 2 else [total_pages]
     m = _REL_LAST_RE.search(q)
     if m:
-        n = int(m.group(1)) if m.group(1) else 1
+        g = (m.group(1) or "").lower()
+        n = int(g) if g.isdigit() else _NUMWORDS.get(g, 1)
         n = max(1, min(n, total_pages))
         return list(range(total_pages - n + 1, total_pages + 1))
     if _REL_FRONT_RE.search(q):
