@@ -13,6 +13,7 @@
 """
 
 import argparse
+import asyncio
 import logging
 import logging.config
 import os
@@ -150,15 +151,28 @@ def build_model_funcs(api_key: str, base_url: str = None):
         else:
             return llm_model_func(prompt, system_prompt, history_messages, **kwargs)
 
+    # embedding 限并发闸：embedding 接口有 RPM/TPM 硬上限，并发开太高 → 429 风暴 →
+    # 全部退避重试，吞吐反而暴跌（日志里刷屏的 "Retrying /embeddings" 即此）。把并发
+    # 匹配到限额，让请求第一次就成功，整体更快。EMBEDDING_MAX_CONCURRENCY=0 关闭此闸
+    # （回到库默认并发）；建图慢/限流严重时调小（如 2~4），额度宽裕时可调大。
+    _emb_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-large")
+    _emb_max = int(os.getenv("EMBEDDING_MAX_CONCURRENCY", "4"))
+    _emb_sem = asyncio.Semaphore(_emb_max) if _emb_max > 0 else None
+
+    async def _embed_func(texts):
+        if _emb_sem is None:
+            return await openai_embed.func(
+                texts, model=_emb_model, api_key=api_key, base_url=base_url
+            )
+        async with _emb_sem:
+            return await openai_embed.func(
+                texts, model=_emb_model, api_key=api_key, base_url=base_url
+            )
+
     embedding_func = EmbeddingFunc(
         embedding_dim=int(os.getenv("EMBEDDING_DIM", "3072")),
         max_token_size=8192,
-        func=lambda texts: openai_embed.func(
-            texts,
-            model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-large"),
-            api_key=api_key,
-            base_url=base_url,
-        ),
+        func=_embed_func,
     )
 
     return llm_model_func, vision_model_func, embedding_func
