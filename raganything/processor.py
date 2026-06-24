@@ -748,60 +748,70 @@ class ProcessorMixin:
             existing_doc_status.get("chunks_count", 0) if existing_doc_status else 0
         )
 
-        for i, item in enumerate(multimodal_items):
-            try:
-                content_type = item.get("type", "unknown")
+        # 并行化（原为串行 for 循环，是并行批处理崩溃后的退回路径，太慢）。
+        # 每个 item 的 process_multimodal_content(batch_mode=True) 只返回结果、不立即并图，
+        # 与上方 batch 路径用的是同一批调用、可并发安全；顺序由 item 下标保序还原。
+        # 并发数由 MULTIMODAL_MAX_CONCURRENCY 控制（默认 4；embedding 另有限并发闸）。
+        import os as _os
+
+        _mm_conc = max(1, int(_os.getenv("MULTIMODAL_MAX_CONCURRENCY", "4")))
+        _mm_sem = asyncio.Semaphore(_mm_conc)
+        _total_mm = len(multimodal_items)
+
+        async def _process_one_item(idx, it):
+            async with _mm_sem:
+                content_type = it.get("type", "unknown")
                 self.logger.info(
-                    f"Processing item {i + 1}/{len(multimodal_items)}: {content_type} content"
+                    f"Processing item {idx + 1}/{_total_mm}: {content_type} content"
                 )
-
-                # Select appropriate processor
                 processor = get_processor_for_type(self.modal_processors, content_type)
-
-                if processor:
-                    # Prepare item info for context extraction
-                    item_info = {
-                        "page_idx": item.get("page_idx", 0),
-                        "index": item.get("_content_list_index", i),
-                        "type": content_type,
-                    }
-
-                    # Process content and get chunk results instead of immediately merging
+                if not processor:
+                    self.logger.warning(
+                        f"No suitable processor found for {content_type} type content"
+                    )
+                    return None
+                item_info = {
+                    "page_idx": it.get("page_idx", 0),
+                    "index": it.get("_content_list_index", idx),
+                    "type": content_type,
+                }
+                try:
                     (
                         enhanced_caption,
                         entity_info,
                         chunk_results,
                     ) = await processor.process_multimodal_content(
-                        modal_content=item,
+                        modal_content=it,
                         content_type=content_type,
                         file_path=file_name,
-                        item_info=item_info,  # Pass item info for context extraction
+                        item_info=item_info,
                         batch_mode=True,
-                        doc_id=doc_id,  # Pass doc_id for proper association
-                        chunk_order_index=existing_chunks_count
-                        + i,  # Proper order index
+                        doc_id=doc_id,
+                        chunk_order_index=existing_chunks_count + idx,
                     )
-
-                    # Collect chunk results for batch processing
-                    all_chunk_results.extend(chunk_results)
-
-                    # Extract chunk ID from the entity_info (actual chunk_id created by processor)
-                    if entity_info and "chunk_id" in entity_info:
-                        chunk_id = entity_info["chunk_id"]
-                        multimodal_chunk_ids.append(chunk_id)
-
-                    self.logger.info(
-                        f"{content_type} processing complete: {entity_info.get('entity_name', 'Unknown')}"
+                except Exception as e:
+                    self.logger.error(
+                        f"Error processing multimodal content (item {idx + 1}): {str(e)}"
                     )
-                else:
-                    self.logger.warning(
-                        f"No suitable processor found for {content_type} type content"
-                    )
+                    self.logger.debug("Exception details:", exc_info=True)
+                    return None
+                self.logger.info(
+                    f"{content_type} processing complete: "
+                    f"{entity_info.get('entity_name', 'Unknown') if entity_info else 'Unknown'}"
+                )
+                _cid = entity_info.get("chunk_id") if entity_info else None
+                return (idx, chunk_results, _cid)
 
-            except Exception as e:
-                self.logger.error(f"Error processing multimodal content: {str(e)}")
-                self.logger.debug("Exception details:", exc_info=True)
-                continue
+        _mm_results = await asyncio.gather(
+            *[_process_one_item(i, item) for i, item in enumerate(multimodal_items)]
+        )
+        # 按原始 item 顺序还原，保证 chunk 列表顺序确定。
+        for _idx, _chunk_results, _chunk_id in sorted(
+            (r for r in _mm_results if r is not None), key=lambda x: x[0]
+        ):
+            all_chunk_results.extend(_chunk_results)
+            if _chunk_id:
+                multimodal_chunk_ids.append(_chunk_id)
 
         # Update doc_status to include multimodal chunks in the standard chunks_list
         if multimodal_chunk_ids:
