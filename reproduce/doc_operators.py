@@ -14,6 +14,9 @@
   （function-calling：把各算子的 .desc 喂给 LLM 选调哪个）即可，L2/L3 一行不动。
 - 与 query.py 的等价性：mention/element/meta 三选一（互斥、优先级递减），locate 可叠加。
 """
+import os
+import re
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
@@ -94,11 +97,60 @@ def _locate_run(q, ctx):
 
 
 # ---------------------------------------------------------------------------
+# 改进① 算子代数（ENABLE_OP_ALGEBRA，默认关）+ 改进② 确定性弃权（ENABLE_ABSTAIN，默认关）
+# 两者独立开关、默认关 → 关时与现状逐字节一致；需 A/B 实测、机制真赢才正式启用、才写进论文。
+# ---------------------------------------------------------------------------
+def _algebra_on():
+    return os.getenv("ENABLE_OP_ALGEBRA", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _abstain_on():
+    return os.getenv("ENABLE_ABSTAIN", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# 算子代数·单文档 top-k 词频（与 GlobalRAG 的区别：单文档 / 零检索 / 零 LLM / 确定可追）
+_TOPK_RE = re.compile(r"\btop[\s-]*(\d{1,2})\b|\b(\d{1,2})\s+most\s+(?:frequent|common)\b",
+                      re.IGNORECASE)
+
+
+def _topk_detect(q, ctx):
+    if not _algebra_on() or not ctx.doc_stats:
+        return False
+    ql = (q or "").lower()
+    return bool(_TOPK_RE.search(q or "")) and any(w in ql for w in ("word", "term", "abbrevi"))
+
+
+def _topk_run(q, ctx):
+    m = _TOPK_RE.search(q or "")
+    k = next((int(g) for g in (m.groups() if m else []) if g), 5)
+    k = max(1, min(k, 20))
+    freq = Counter(w.lower() for w in dm._WORD_RE.findall((ctx.doc_stats or {}).get("_text", "")))
+    top = freq.most_common(k)
+    if not top:
+        return ""
+    items = "; ".join(f"{w} ({c}x)" for w, c in top)
+    return ("[Programmatically computed (deterministic, no retrieval, no LLM call): "
+            f"the {k} most frequent words are: {items}.]")
+
+
+# 确定性弃权：注入文本含"多值/歧义"信号（如定位命中≥2页）→ 不注入。通用可靠性规则，治"目标多值"失败。
+_AMBIGUOUS_RE = re.compile(r"page\(s\)\s+\d+\s*[,，]\s*\d+", re.IGNORECASE)
+
+
+def _abstain_filter(note: str) -> str:
+    if not _abstain_on() or not note:
+        return note
+    return "" if _AMBIGUOUS_RE.search(note) else note
+
+
+# ---------------------------------------------------------------------------
 # 注册表（顺序 = 优先级，与 query.py 的 if/elif 一致）
 # ---------------------------------------------------------------------------
 OPERATORS: List[Operator] = [
     Operator("mention_count", "数某个词/短语在全文出现多少次", _mention_detect, _mention_run),
     Operator("element_count", "数文档里有几张图/表/公式（可排除附录）", _elemcount_detect, _stats_run),
+    Operator("topk_freq", "取前 k 高频词/术语（算子代数·单文档，ENABLE_OP_ALGEBRA）",
+             _topk_detect, _topk_run),
     Operator("meta_stats", "页数/词数/最高频词/最常见缩写/某页内容等全局统计量",
              _meta_detect, _stats_run),
     Operator("locate", "某章节/内容在第几页（标题→页码索引）",
@@ -118,10 +170,10 @@ def dispatch(question: str, ctx: Ctx, operators=None):
     for op in ops:
         if op.stackable:
             if op.detect(question, ctx):
-                notes.append(op.run(question, ctx))
+                notes.append(_abstain_filter(op.run(question, ctx)))
                 fired.append(op.name)
         elif not statistics_done and op.detect(question, ctx):
-            notes.append(op.run(question, ctx))
+            notes.append(_abstain_filter(op.run(question, ctx)))
             fired.append(op.name)
             statistics_done = True
     return "\n\n".join(n for n in notes if n), fired
