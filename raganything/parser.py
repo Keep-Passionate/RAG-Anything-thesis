@@ -933,10 +933,18 @@ class MineruParser(Parser):
             stdout_thread.join(timeout=5)
             stderr_thread.join(timeout=5)
 
-            if return_code != 0 or error_lines:
+            # 只认返回码：MinerU 会把进度/INFO 也打到 stderr，大文档 batch 模式下含 "error"
+            # 字样的行会被收进 error_lines；但 return_code==0 即解析成功，不能据此误判失败
+            # （否则 318 页这类巨无霸虽解析成功却被中断、建不出图）。
+            if return_code != 0:
                 cls.logger.info("[MinerU] Command executed failed")
                 raise MineruExecutionError(return_code, error_lines)
             else:
+                if error_lines:
+                    cls.logger.warning(
+                        f"[MinerU] return code 0 (success) but {len(error_lines)} stderr "
+                        f"line(s) matched 'error'; treated as non-fatal."
+                    )
                 cls.logger.info("[MinerU] Command executed successfully")
 
         except MineruExecutionError:
