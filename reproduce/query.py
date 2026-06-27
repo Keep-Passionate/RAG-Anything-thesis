@@ -468,10 +468,19 @@ async def process_with_rag(
                 emr_kw = {}
                 if emr_on and (kw_visual or kw_table):
                     emr_kw["chunk_top_k"] = emr_chunk_top_k
-                result = await rag.aquery(
-                    q_llm, mode="mix", response_type="One Sentence",
-                    vlm_enhanced=q_vlm, **emr_kw
-                )
+                try:
+                    result = await rag.aquery(
+                        q_llm, mode="mix", response_type="One Sentence",
+                        vlm_enhanced=q_vlm, **emr_kw
+                    )
+                except Exception as _e:
+                    # 逐题容错：阿里内容审查(data_inspection_failed)等单题失败时记空答、跳过，
+                    # 不让一道被拦的题导致整篇 query 崩溃不保存（敏感内容文档常见）。
+                    if "data_inspection" in str(_e) or "inappropriate" in str(_e):
+                        logger.warning(f"内容审查拦截本题，记空答跳过: {q[:60]}")
+                        result = ""
+                    else:
+                        raise
 
             rec = {
                 "question": q,
