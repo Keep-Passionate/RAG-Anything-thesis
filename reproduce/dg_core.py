@@ -564,8 +564,9 @@ def r_locate(m: DocModel, q: str) -> Fact | None:
         conf = round(1.0 / len(pages), 2)                     # 实例级置信:命中页越少越确定
     else:
         return None
-    # 修复(16题诊断):"physical page N" 重写框架反把对的搞错。默认报朴素页号;DG_PAGEMAP_REFRAME=true 才给双框架。
-    if _dg_env("DG_PAGEMAP_REFRAME", False):
+    # 页框架(校准:locate 44% 多因框架不匹配,金标常"印刷 or 物理"两收)。
+    # 仅当 PageMap 高置信(双源可靠)时给双框架对齐金标;不可信时报朴素页号(避免初版的偏移误伤)。
+    if m.page_map.confident or _dg_env("DG_PAGEMAP_REFRAME", False):
         framed = "; ".join(m.page_map.phys_frame(p) for p in pages)
         note = (f'[Programmatic locator: "{target}" appears on {framed}. '
                 f"Page questions may expect either the printed or physical number.]")
