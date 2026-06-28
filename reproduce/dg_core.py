@@ -541,30 +541,39 @@ def r_locate(m: DocModel, q: str) -> Fact | None:
     if not target:
         return None
     tl = target.lower()
-    # 区分"命中标题"与"命中正文":命中章节标题=高确定;只在正文出现=按命中页数定确定度。
-    heading_pages, body_pages = [], []
-    if m.has_elements:
-        for it in m.elements:
+    # 排除目录页:目标常在目录里"提一嘴",不是真正讨论页(治 locate 找错页)。
+    toc = set()
+    for it in m.elements:
+        if it.get("text_level") and re.search(r"table of contents|^\s*contents\s*$",
+                                              str(it.get("text", "")), re.I):
             pg = it.get("page_idx")
-            if not isinstance(pg, int):
-                continue
-            if it.get("text_level") and tl in str(it.get("text", "")).lower():
-                if (pg + 1) not in heading_pages:
-                    heading_pages.append(pg + 1)
-            elif tl in _norm_caption(it).lower():
-                if (pg + 1) not in body_pages:
-                    body_pages.append(pg + 1)
-    if not heading_pages and not body_pages:
-        for i, t in enumerate(m.per_page_text):
-            if tl in t.lower():
-                body_pages.append(i + 1)
+            if isinstance(pg, int):
+                toc.add(pg + 1)
+    # 1) 命中【章节标题】= 最可靠(排除目录里的条目)
+    heading_pages = []
+    for it in m.elements:
+        pg = it.get("page_idx")
+        if (isinstance(pg, int) and it.get("text_level") and (pg + 1) not in toc
+                and tl in str(it.get("text", "")).lower() and (pg + 1) not in heading_pages):
+            heading_pages.append(pg + 1)
     if heading_pages:
-        pages, conf = sorted(heading_pages)[:2], 0.9          # 命中标题:定位最可靠
-    elif body_pages:
-        pages = sorted(body_pages)[:4]
-        conf = round(1.0 / len(pages), 2)                     # 实例级置信:命中页越少越确定
+        pages, conf = sorted(heading_pages)[:2], 0.9
     else:
-        return None
+        # 2) 按【每页出现次数】选最密集页(排除目录)。引言里只"提一嘴"次数少→自然落选;
+        #    真正讨论的章节出现多→胜出。conf=最高页占比(越集中越确定)。
+        hits = {}
+        for i, t in enumerate(m.per_page_text):
+            if (i + 1) in toc:
+                continue
+            c = _flex_count(t, target)
+            if c > 0:
+                hits[i + 1] = c
+        if not hits:
+            return None  # 只在目录/根本没出现 → 弃权(治"硬编不存在的附录"假阳性)
+        total = sum(hits.values())
+        top = max(hits.values())
+        pages = sorted([p for p, c in hits.items() if c == top])[:2]
+        conf = round(top / total, 2)
     # 页框架(校准:locate 44% 多因框架不匹配,金标常"印刷 or 物理"两收)。
     # 仅当 PageMap 高置信(双源可靠)时给双框架对齐金标;不可信时报朴素页号(避免初版的偏移误伤)。
     if m.page_map.confident or _dg_env("DG_PAGEMAP_REFRAME", False):
