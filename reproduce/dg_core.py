@@ -27,6 +27,14 @@ try:
 except Exception:  # 容错:dg_core 也可单独 import
     text_stats = count_mentions = locate_content_list = None
 
+
+def _dg_env(name: str, default: bool = True) -> bool:
+    """dg_core 内部消融/修复开关。default=该项现状行为;改 env 可单独开关某层做层级测试。"""
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return v.strip().lower() in ("1", "true", "yes", "on")
+
 # =====================================================================================
 # Layer 1 —— DocumentModel
 # =====================================================================================
@@ -64,6 +72,8 @@ class PageMap:
 
     @property
     def confident(self) -> bool:
+        if not _dg_env("DG_PAGEMAP", True):
+            return False  # 消融 DG_PAGEMAP=false:强制关物理/印刷页重写,页号按原样报
         return self.confidence >= PAGEMAP_CONF_THRESHOLD and self.offset > 0
 
     def to_physical(self, printed: int):
@@ -237,6 +247,9 @@ _RE_REL_FRONT = re.compile(r"\b(front\s*page|first\s+page|cover\s+page|frontpage
 _RE_PAGE_CONTENT = re.compile(
     r"(what|topic|content|focus|message|summary|purpose|talk about|conveyed|present)", re.I)
 _RE_TITLE = re.compile(r"\b(document|paper|report|newspaper)\s+title\b|\btitle of the\b", re.I)
+# 缩写 / 最高频词(16题诊断:dgcore 原先没这两类 resolver→弃权→答错 4+1 题)
+_RE_ABBR = re.compile(r"\b(?:most\s+(?:common|frequent)\s+)?(?:abbreviation|acronym)s?\b", re.I)
+_RE_TOPWORDS = re.compile(r"\b(?:top\s*\d*\s*)?most\s+(?:common|frequent)\s+words?\b", re.I)
 
 
 def _mention_target(q: str):
@@ -304,7 +317,8 @@ def r_mention(m: DocModel, q: str) -> Fact | None:
     target = _mention_target(q)
     if not target:
         return None
-    text = m.element_text_with_tables()
+    # 修复(16题诊断):含表格计数会过计(LSTM+CRF 6→8)。默认纯正文;DG_MENTION_TABLES=true 才含表格。
+    text = m.element_text_with_tables() if _dg_env("DG_MENTION_TABLES", False) else m.full_text
     variants = _normalize_mention_variants(target)
     best = max((_flex_count(text, v) for v in variants), default=0)
     if best == 0:
@@ -461,6 +475,34 @@ def r_title(m: DocModel, q: str) -> Fact | None:
     return None
 
 
+def r_abbrev_words(m: DocModel, q: str) -> Fact | None:
+    """缩写 / 最高频词:收编旧 DSG 的有效逻辑(text_stats)。dgcore 原先漏了这两类→弃权→答错。"""
+    if text_stats is None or not _dg_env("DG_META_STATS", True):
+        return None
+    is_abbr = bool(_RE_ABBR.search(q))
+    is_tw = bool(_RE_TOPWORDS.search(q)) and not is_abbr
+    if not (is_abbr or is_tw):
+        return None
+    try:
+        s = text_stats(m.full_text)
+    except Exception:
+        return None
+    if is_abbr:
+        abv = s.get("top_abbrevs") or []
+        if not abv:
+            return None
+        ab, cnt = abv[0]
+        return Fact("abbrev", ab, 0.7,
+                    f'[Programmatically computed: the most frequent abbreviation/acronym is "{ab}" '
+                    f"({cnt} occurrences).]", "pdf")
+    tw = s.get("top_words") or []
+    if not tw:
+        return None
+    top3 = ", ".join(tw[:3])
+    return Fact("topwords", top3, 0.7,
+                f"[Programmatically computed: the top-3 most frequent words are {top3}.]", "pdf")
+
+
 def r_locate(m: DocModel, q: str) -> Fact | None:
     if not _RE_LOCATE.search(q):
         return None
@@ -483,10 +525,15 @@ def r_locate(m: DocModel, q: str) -> Fact | None:
     if not pages:
         return None
     pages = sorted(pages)[:4]
-    framed = "; ".join(m.page_map.phys_frame(p) for p in pages)
-    return Fact("locate", pages, 0.7,
-                f'[Programmatic locator: "{target}" appears on {framed}. '
-                f"Page questions may expect either the printed or physical number.]", "content_list/pdf")
+    # 修复(16题诊断):"physical page N" 重写框架反把对的搞错。默认报朴素页号;DG_PAGEMAP_REFRAME=true 才给双框架。
+    if _dg_env("DG_PAGEMAP_REFRAME", False):
+        framed = "; ".join(m.page_map.phys_frame(p) for p in pages)
+        note = (f'[Programmatic locator: "{target}" appears on {framed}. '
+                f"Page questions may expect either the printed or physical number.]")
+    else:
+        framed = ", ".join(f"page {p}" for p in pages)
+        note = f'[Programmatic locator: "{target}" appears on {framed}.]'
+    return Fact("locate", pages, 0.7, note, "content_list/pdf")
 
 
 def r_extract_page(m: DocModel, q: str) -> Fact | None:
@@ -536,12 +583,13 @@ def r_meta_stats(m: DocModel, q: str) -> Fact | None:
 
 
 # 路由优先级:具体 -> 泛化。第一个产出 Fact 且置信达阈值的胜出(否则弃权=退回基座)。
-_RESOLVERS = [r_mention, r_locate, r_extract_page, r_title, r_elements, r_references,
-              r_sections, r_pages_total, r_words, r_footnotes]
+_RESOLVERS = [r_mention, r_abbrev_words, r_locate, r_extract_page, r_title, r_elements,
+              r_references, r_sections, r_pages_total, r_words, r_footnotes]
 
 # 各 kind 的注入置信阈值(噪声大的设高 -> 倾向弃权,保护已答对的题)
 _THRESHOLD = {
     "mention": 0.6, "locate": 0.6, "extract_page": 0.6, "title": 0.6,
+    "abbrev": 0.6, "topwords": 0.6,
     "elements": 0.6, "elements_sum": 0.6, "references": 0.99, "sections": 0.99,
     "pages": 0.6, "words": 0.99, "words_page": 0.99, "footnotes": 0.99, "meta_stats": 0.99,
 }
@@ -555,12 +603,13 @@ def ground(question: str, pdf_path: str, content_list_path: str = None,
     m = model or build_doc_model(pdf_path, content_list_path)
     if m is None:
         return None
+    no_abstain = not _dg_env("DG_ABSTAIN", True)  # DG_ABSTAIN=false:不弃权、全注入(消融测试用)
     for r in _RESOLVERS:
         try:
             fact = r(m, question)
         except Exception:
             fact = None
-        if fact and fact.note and fact.confidence >= _THRESHOLD.get(fact.kind, 0.6):
+        if fact and fact.note and (no_abstain or fact.confidence >= _THRESHOLD.get(fact.kind, 0.6)):
             return fact
     return None
 
