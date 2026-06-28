@@ -309,6 +309,8 @@ async def process_with_rag(
             q_llm = q
             meta_used = False
             locate_used = False
+            dg_used = False
+            dg_kind = ""
             if env_on("ENABLE_DG_CORE"):
                 # —— 统一框架 dg_core：单入口 路由→DocumentModel→确定性 resolver→Fact→低置信弃权 ——
                 # 取代下面散落的 op/关键词/locate 路由;默认关,零回归;子集 A/B 验证后再设默认。
@@ -316,6 +318,8 @@ async def process_with_rag(
                 _fact = _dg_ground(q, file_path)
                 if _fact:
                     q_llm = f"{q}\n\n{_fact.note}"
+                    dg_used = True
+                    dg_kind = _fact.kind
                     meta_used = _fact.kind != "locate"
                     locate_used = _fact.kind == "locate"
             elif op_ctx is not None:
@@ -507,6 +511,9 @@ async def process_with_rag(
                 rec["anchor_used"] = anchor_used
             if locate_index is not None:
                 rec["locate_used"] = locate_used
+            if env_on("ENABLE_DG_CORE"):
+                rec["dg_used"] = dg_used      # dg_core 是否注入(机制证据,供逐题归因)
+                rec["dg_kind"] = dg_kind      # 触发的 resolver 类型(mention/locate/extract_page/...)
             if ncg_on:
                 rec["ncg_used"] = ncg_used
             if rr_on:
