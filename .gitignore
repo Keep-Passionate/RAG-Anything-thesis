@@ -105,3 +105,11 @@ experiments/results/
 # 上面第 72 行的 `test_*` 会忽略所有 test_ 开头的文件，
 # 用 `!` 取反，确保 tests/ 下我们写的测试能进仓库。
 !tests/test_*.py
+
+# ---- 本地学习用：代码精读讲义（不进仓库、不推 GitHub）----
+代码精读*.md
+**/代码精读*.md
+
+# ---- DG-RAG 本地测试夹具：content_list 服务器可再生、tar 二进制，不进仓库 ----
+reproduce/_testdata/content_lists/
+reproduce/_testdata/*.tar.gz

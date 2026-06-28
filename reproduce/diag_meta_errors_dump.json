@@ -1,0 +1,1666 @@
+{
+  "B_notfired_baseline_wrong": [
+    {
+      "doc_id": "0",
+      "question": "Who is the last author of the paper?",
+      "gold": "Sameer Singh",
+      "ours_answer": "The last author of the paper is Robert L. Logan IV.\n\n### References\n\n- [1] P19-1598.pdf",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "15",
+      "question": "How many authors are on the paper?",
+      "gold": "7",
+      "ours_answer": "The paper has five authors: Cristian Danescu-Niculescu-Mizil, Justine Zhang, Jonathan P. Chang, Lucas Dixon, and Yiqing Hua.\n\n### References\n\n- [1] P18-1125.pdf",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "15",
+      "question": "How many institutions are listed on the paper?",
+      "gold": "3",
+      "ours_answer": "The provided context does not contain any information about the number of institutions listed on the paper.\n\n### References",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "19",
+      "question": "How many references are there in the paper?",
+      "gold": "42.",
+      "ours_answer": "The paper contains 29 references, as indicated by the bibliographic reference list on page 9, which includes 29 scholarly citations supporting the paper’s techn",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "28",
+      "question": "How many sections are there in this paper?",
+      "gold": "6.",
+      "ours_answer": "The paper contains five main sections: Section 1 (Introduction), Section 2 (Related Work), Section 3 (Robust Word Recognition), Section 4 (Experimental Evaluati",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "45",
+      "question": "How many footnotes in total does the paper have?",
+      "gold": "2.",
+      "ours_answer": "The paper has **three** footnotes in total: one on page 0 (footnote 1), one on page 6 (footnote 2), and one on page 7 (footnote 3).\n\n### References\n\n- [1] N19-1",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "46",
+      "question": "How many authors are listed in the paper?",
+      "gold": "11.",
+      "ours_answer": "The paper lists **12 authors**, as indicated by the author list in the CodeBERT paper, which includes Zhangyin Feng and Daya Guo marked with superscript asteris",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "52",
+      "question": "How many people are listed in the company leadership?",
+      "gold": "34",
+      "ours_answer": "The company leadership section lists 12 executive officers, including Jon R. Moeller as Chairman of the Board, President and Chief Executive Officer, Shailesh G",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "55",
+      "question": "How many parts does the report consist of?",
+      "gold": "3",
+      "ours_answer": "The report consists of two main parts: Part I, which contains business-related disclosures (including Items 1 through 4), and Part II, which contains financial ",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "91",
+      "question": "What does the appendices include?",
+      "gold": "(1) Abbreviations and Acronyms; (2) Department of State Locations; (3) Acknowledgements and Contact Information; (4) Websites of Interest",
+      "ours_answer": "The appendices of the Fiscal Year 2020 Agency Financial Report include supplementary materials such as a glossary of abbreviations and acronyms, a global map of",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "92",
+      "question": "By which department was the report released?",
+      "gold": "Geospatial Data Strategy",
+      "ours_answer": "The report was released by the United States Department of State.",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "110",
+      "question": "How many chapters are there in total in the document?",
+      "gold": "6.",
+      "ours_answer": "The document contains at least six chapters, as explicitly referenced in the knowledge base: Chapter 1 (“AFRICA”), Chapter 2 (“State Sponsors of Terrorism”), Ch",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "118",
+      "question": "What institution or agency released the report?",
+      "gold": "Functional Bureau Strategy.",
+      "ours_answer": "The report was released by the **U.S. Department of State**, specifically through its **Office of Foreign Missions (OFM)**, a bureau within the Department respo",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "123",
+      "question": "How many footnotes are there in this document?",
+      "gold": "31.",
+      "ours_answer": "The document contains at least 29 footnotes, as evidenced by the highest numbered footnote explicitly referenced in the knowledge base—footnote 29, which cites ",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "134",
+      "question": "How many footnotes does the report have?",
+      "gold": "136",
+      "ours_answer": "The report contains at least 136 footnotes, as evidenced by the highest-numbered footnote explicitly cited in the context—Footnote 136, which references a *Glob",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "140",
+      "question": "How many countries are covered in the report?",
+      "gold": "15",
+      "ours_answer": "The report covers 16 G-20 countries, including Argentina, Australia, Brazil, Canada, China, Germany, India, Italy, Japan, Mexico, Russia, Saudi Arabia, South Af",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "149",
+      "question": "How many regions are mentioned on the document's cover?",
+      "gold": "6.",
+      "ours_answer": "The document's cover does not mention any regions, as the provided context contains no information about the cover page listing or describing regions; instead, ",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "161",
+      "question": "How many regions are listed on the document's cover?",
+      "gold": "20.",
+      "ours_answer": "The document's cover does not list any regions; instead, it features a world map with color-coded countries categorized by their legal responses to \"fake news\" ",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "158",
+      "question": "How many footnotes are there in the section about Brazil in this report?",
+      "gold": "43.",
+      "ours_answer": "The section about Brazil in the report contains **16 footnotes**, as evidenced by the highest numbered footnote cited in the Brazil-related content—footnote 16,",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "163",
+      "question": "When was the document released?",
+      "gold": "On January 2021.",
+      "ours_answer": "The document was released in 2021, as indicated by the publication year of the cited chapter “Blockchain & Cryptocurrency Regulation 2021: United Kingdom” and t",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "164",
+      "question": "How many subsections does Section III have?",
+      "gold": "4.",
+      "ours_answer": "Section III has three subsections: Section III.A (discussing regulatory obligations derived from the PRC Cybersecurity Law), Section III.B (titled “Data Securit",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "165",
+      "question": "How many regions are listed on the cover?",
+      "gold": "17.",
+      "ours_answer": "The provided context and images do not contain any information about a cover or regions listed on it. Therefore, I cannot determine how many regions are listed ",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "191",
+      "question": "What is the newspaper volume number?",
+      "gold": "No. 59575",
+      "ours_answer": "The newspaper volume number is CLXXII, as indicated in the header of the New York Times edition dated October 13, 2022.\n\n### References\n\n- [1] 20221013.pdf",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    }
+  ],
+  "B_notfired_baseline_right": [
+    {
+      "doc_id": "35",
+      "question": "What is the brief summary of Section 2.1?",
+      "gold": "",
+      "ours_answer": "Section 2.1, titled \"Motivation,\" introduces the foundational rationale for the paper's proposed contextual augmentation framework by critiquing the limitations",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 1
+    },
+    {
+      "doc_id": "142",
+      "question": "How many countries listed in the report are not from European Union?",
+      "gold": "11",
+      "ours_answer": "The report lists 11 countries outside the European Union that have enacted legislation containing a net zero emissions goal, with two of them setting a target d",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 1
+    }
+  ],
+  "A_or_C_fired_wrong": [
+    {
+      "doc_id": "0",
+      "question": "On which page does the paper introduce the corpus statistics?",
+      "gold": "Page 5",
+      "ours_answer": "The paper introduces the corpus statistics on page 4, which corresponds to Section 3 titled \"Linked WikiText-2\". This section includes Table 2, which presents t",
+      "doc_meta_used": true,
+      "locate_used": true,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "0",
+      "question": "How many time does the paper mention WikiText-2?",
+      "gold": "31",
+      "ours_answer": "The paper mentions WikiText-2 28 times, as verified by the programmatic count of the phrase \"WikiText-2\" in the document text.\n\n### References\n\n- [1] P19-1598.p",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "2",
+      "question": "How many words are there in total in the paper?",
+      "gold": "3790",
+      "ours_answer": "The paper contains approximately 3,809 words in total.\n\n### References\n\n- [1] P19-1164.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "4",
+      "question": "What is the first sentence on page 5?",
+      "gold": "RetrieveNRefine obtains statistically significant wins over the retriever Memory Network model and the generator Seq2Seq model using a binomial two-tailed test,",
+      "ours_answer": "The first sentence on page 5 is \"RetNRef++ model has similar statistics to human utterances and provides more engaging conversations according to human judgment",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "6",
+      "question": "How many pages does the paper have, excluding references and appendix?",
+      "gold": "9",
+      "ours_answer": "The paper has 10 pages excluding references and appendix, as indicated by the logical page numbering from Page 1 to Page 10, with the References section beginni",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "9",
+      "question": "How many words in total of the page 1?",
+      "gold": "625",
+      "ours_answer": "The total number of words on page 1 is not explicitly stated in the provided context or document chunks, and no direct word count for page 1 is available from t",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "23",
+      "question": "On which page does the paper present the dataset sizes?",
+      "gold": "6 or 292.",
+      "ours_answer": "The paper presents the dataset sizes on page 5, where Table 1 and Table 2 are located, providing detailed statistics for WIKIHOP and MEDHOP datasets.\n\n### Refer",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "31",
+      "question": "On which page does the paper detail the baseline models?",
+      "gold": "4 or 1702.",
+      "ours_answer": "The paper details the baseline models on Page 3, where Section 5, titled \"Baselines,\" discusses comparative performance of supervised versus transfer-based meth",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "32",
+      "question": "How many words does the paper have in total?",
+      "gold": "6586.",
+      "ours_answer": "The paper has approximately 6,538 words in total.\n\n### References\n\n- [1] N18-1187.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "47",
+      "question": "How many tables are there in the paper?",
+      "gold": "7.",
+      "ours_answer": "The paper contains seven tables: Table 2, Table 3, Table 4, Table 5, Table 6, Table 7, and an unnamed table in the reference list.\n\n### References\n\n- [1] P18-10",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "37",
+      "question": "On which page does the paper detail the hyperparameter setting?",
+      "gold": "4 or 4765.",
+      "ours_answer": "The paper details the hyperparameter settings on Page 11, which is also marked with the page number 4773 in the footer. This page contains the section \"A.1 Trai",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "40",
+      "question": "On which page does the paper detail the hyperparameter settings?",
+      "gold": "6 or 429.",
+      "ours_answer": "The paper details the hyperparameter settings on Page 4, where the values for λs (λmul(s), λadv(s), λmul(c), λadv(c)) are specified as 10, 1, 3, and 0.03 respec",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "41",
+      "question": "What is the first sentence on page 4?",
+      "gold": "4.1 User Characteristics Extraction To depict how users participate in social networking, we employ their metadata and profiles to define the feature vector xj ",
+      "ours_answer": "The first sentence on page 4 cannot be determined from the provided context, as no text excerpt or content from page 4 is included in the Document Chunks or Kno",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "50",
+      "question": "What is the main purpose of the last page in the document?",
+      "gold": "Signatures of the people listed in the document",
+      "ours_answer": "The main purpose of the last page in the document is to serve as a formal signature block for the UnitedHealth Group Incorporated's 2020 Form 10-K filing, certi",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "52",
+      "question": "How many times does the paper mention the CEO's name?",
+      "gold": "11",
+      "ours_answer": "The paper mentions the CEO's name, Jon R. Moeller, multiple times across various sections, including his signature on the Form 10-K filing dated August 5, 2022,",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "54",
+      "question": "How many times does the report mention the name of Global relationship partner?",
+      "gold": "4",
+      "ours_answer": "The report mentions the name of Global relationship partner 0 times, as verified by the document text.\n\n### References\n\n- [1] NYSE_NVS_2021.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "58",
+      "question": "What is the main content presented in the final page?",
+      "gold": "Valuation and qualifying accounts",
+      "ours_answer": "The final page of the document, which is Page 170, contains the \"SIGNATURES\" section, as indicated by the context that mentions the \"SIGNATURES\" section appears",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "59",
+      "question": "How many sustainability and community hightlights are showed in page 4?",
+      "gold": "9",
+      "ours_answer": "The Sustainability & Community Highlights section is not located on Page 4 of the PepsiCo Annual Report 2020; instead, it spans pages 2–3 and contains dense dat",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "59",
+      "question": "On which page does the CEO's letter to the shareholders begin?",
+      "gold": "Page 5",
+      "ours_answer": "The CEO's letter to the shareholders begins on Page 4, marked by the header \"Dear Fellow Shareholders,\" which serves as the formal salutation and structural ope",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "66",
+      "question": "What is the topic of contents on page 4?",
+      "gold": "Highlights in 2020",
+      "ours_answer": "The topic of contents on page 4 is the transition from preliminary front matter to core organizational disclosure, serving as a structural pivot between the 'Fi",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "67",
+      "question": "On which pages does the report provide the information about executive officers?",
+      "gold": "From 10 to 11. OR From 14 to 15.",
+      "ours_answer": "The report provides information about executive officers on pages 10 to 14, with the section titled \"Information about our Executive Officers\" beginning on page",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "68",
+      "question": "What does page 23 mainly talk about?",
+      "gold": "This page from Novo Nordisk's Annual Report 2020 discusses advances in their pharmaceutical research and development, highlighting regulatory approvals and clin",
+      "ours_answer": "Page 23 of the Novo Nordisk Annual Report 2020 primarily serves as a structural and navigational transition point, featuring a multi-level hierarchical header t",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "69",
+      "question": "What is the primary focus of the content on page 173?",
+      "gold": "This page details Wells Fargo's involvement in various legal proceedings and investigations related to their business activities, including antitrust litigation",
+      "ours_answer": "The primary focus of the content on page 173 is the continuation of Note 15: Legal Actions, which details material litigation and regulatory matters involving W",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 1
+    },
+    {
+      "doc_id": "70",
+      "question": "How many times does the paper mention \"total revenue\"?",
+      "gold": "108.",
+      "ours_answer": "The paper mentions \"total revenue\" 19 times, as confirmed by the programmatic verification of the document text.\n\n### References\n\n- [1] NYSE_SHLX_2020.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "72",
+      "question": "What is the major topic of the content on page 37?",
+      "gold": "The major topic of this page is the authorization granted to the Managing Board of Siemens Healthineers AG to issue and repurchase shares.",
+      "ours_answer": "The major topic of the content on page 37 is the statutory disclosure of takeover-relevant information and explanatory report, which includes detailed provision",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "75",
+      "question": "On which page does the document present the signature part?",
+      "gold": "page 59.",
+      "ours_answer": "The document presents the signature part on Page 58, which contains the 'SIGNATURES' section immediately following the F-19 identifier and includes statutory ce",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "76",
+      "question": "What is the primary focus of page 41?",
+      "gold": "This page primarily discusses Qualcomm's financial performance in fiscal 2021, highlighting a significant increase in revenues and net income compared to fiscal",
+      "ours_answer": "The primary focus of page 41 is to introduce the \"Results of Operations\" section by presenting a quantitative analysis of Qualcomm's revenue performance for fis",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 1
+    },
+    {
+      "doc_id": "78",
+      "question": "What is the brief summary of page 43 in the document?",
+      "gold": "Chevron Corporation's 2021 Annual Report page 43 discusses the company's liquidity and capital resources, highlighting a strong balance sheet, an increase in ca",
+      "ours_answer": "Page 43 of the Chevron Corporation 2021 Annual Report contains the header \"Management's Discussion and Analysis of Financial Condition and Results of Operations",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "79",
+      "question": "On which page does the document report the information about executive officers?",
+      "gold": "8 or 14.",
+      "ours_answer": "The document reports information about executive officers on Page 12, which is the physical page containing the \"Executive Officers\" section, and this section i",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "81",
+      "question": "How many words are there in total in the document?",
+      "gold": "123076.",
+      "ours_answer": "The total number of words in the document is approximately 127,198.\n\n### References\n\n- [1] OTC_TCS_2020.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "85",
+      "question": "On which page does the report detail the information about independent director?",
+      "gold": "page 5.",
+      "ours_answer": "The report details information about the independent director, ONG Yih Ching, on page 6, where his profile and role as an acting chair are described in the \"Boa",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "221",
+      "question": "How many words are there in the document?",
+      "gold": "2180.",
+      "ours_answer": "The document contains approximately 2,458 words.\n\n### References\n\n- [1] ASX_AJY_2020.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "86",
+      "question": "What is the primary message conveyed on page 11 in the document?",
+      "gold": "Accenture plc's Class A ordinary shares are traded on the New York Stock Exchange under the symbol ACN and that the company provides its financial reports and o",
+      "ours_answer": "The primary message conveyed on Page 11 is that it serves as a **regulatory transition page**, functioning as a numerically labeled, content-sparse structural b",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "100",
+      "question": "On which page mentions the guiding principles?",
+      "gold": "16",
+      "ours_answer": "The Guiding Principles are mentioned on Page 4, where they are formally introduced as part of the Executive Summary and strategic framework, and on Page 5, whic",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "102",
+      "question": "What is the page range for the 'Bureau Goals and Objectives' section?",
+      "gold": "Page 7 to 16",
+      "ours_answer": "The 'Bureau Goals and Objectives' section begins on **Page 6**, directly following the 'FOR PUBLIC RELEASE' header on Page 5, and includes detailed goals such a",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "108",
+      "question": "How many times does the report mention \"PM\"?",
+      "gold": "86.",
+      "ours_answer": "The report mentions \"PM\" 106 times.",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "111",
+      "question": "What is the main content of the last three pages of the document?",
+      "gold": "The last three pages outline a goal to empower the workforce by fostering a diverse, equitable, inclusive, and flexible environment, highlighting areas for impr",
+      "ours_answer": "The last three pages of the document—Pages 16, 17, and 18—collectively contain Bureau Objectives 3.2–3.4 (ethics staffing, foreign assistance compliance, and re",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "112",
+      "question": "What is the main content of the second-to-last page of the document?",
+      "gold": "The page discusses the U.S. Bureau of International Security and Nonproliferation's (ISN) objective to enhance Diversity, Equity, Inclusion, and Accessibility (",
+      "ours_answer": "The second-to-last page of the document—Page 26 of 27—is a structural metadata artifact positioned in the bottom-right margin, serving as navigational and seque",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "114",
+      "question": "How many tables and figures are there in total in the document?",
+      "gold": "31.",
+      "ours_answer": "The document contains a total of 8 tables and 23 figures, as explicitly listed in Appendix C titled \"Tables, Figures, and Image Credits,\" which catalogs all vis",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "115",
+      "question": "On which page does the report detail the Bureau Objective 4.2?",
+      "gold": "14 or 16.",
+      "ours_answer": "Bureau Objective 4.2 is detailed on **Page 15 of 17**, which physically appears on page index 16 and hosts the objective’s justification, linkages to the Joint ",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "115",
+      "question": "How many times does the document mention \"DS\"?",
+      "gold": "76.",
+      "ours_answer": "The phrase \"DS\" appears 88 times in the document text.",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "116",
+      "question": "What is the major message conveyed in the last page?",
+      "gold": "S/GWI recognizes the risk of ineffective performance monitoring and the importance of integrating gender analysis into the strategic planning process of the dep",
+      "ours_answer": "The major message conveyed on the last page (Page 22 of 22) is the conclusion of the Office of Global Women’s Issues’ (S/GWI) draft Joint Strategic Plan-aligned",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "121",
+      "question": "What is the main content of the last page of the document?",
+      "gold": "The page highlights the importance of information, knowledge, and data management systems for the Bureau of Population, Refugees, and Migration (PRM) to enable ",
+      "ours_answer": "The main content of the last page of the document—identified as **Page 21 of 21**, the terminal pagination marker—is the conclusion of the Bureau’s Cross-Cuttin",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 1
+    },
+    {
+      "doc_id": "125",
+      "question": "On which page does the document present the signature of US District Judge?",
+      "gold": "7.",
+      "ours_answer": "The document presents the signature of U.S. District Judge Oldon C. Fallon on **Page 6**, as confirmed by the header “Case 2:23-cv-06661-EEF-JVM Document 14 Fil",
+      "doc_meta_used": true,
+      "locate_used": true,
+      "baseline_acc": 1
+    },
+    {
+      "doc_id": "126",
+      "question": "What page of the document outlines the \"Bureau Strategic Framework\"?",
+      "gold": "Page 3.",
+      "ours_answer": "The \"Bureau Strategic Framework\" is outlined on **Page 4 of 22**, which serves as the first full exposition of the Bureau’s Strategic Framework, containing Goal",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "128",
+      "question": "What page does the Bureau Strategic Framework section begin on?",
+      "gold": "Page 5.",
+      "ours_answer": "The Bureau Strategic Framework section begins on **Page 6**, as confirmed by multiple sources in the context: it is explicitly stated that “The Bureau Strategic",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "141",
+      "question": "How many words are there in total in the file?",
+      "gold": "1508",
+      "ours_answer": "The file contains approximately 1,537 words in total.\n\n### References\n\n- [1] 2020714994.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "175",
+      "question": "How many words does the document have in total?",
+      "gold": "2979.",
+      "ours_answer": "The document has approximately 2998 words in total.",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "150",
+      "question": "How many times does the report mention \"scientific ethics\"?",
+      "gold": "11.",
+      "ours_answer": "The report mentions \"scientific ethics\" 9 times.  \n\n### References\n\n- [1] 2023555925.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "151",
+      "question": "How many times does the document mention \"value-added tax\"?",
+      "gold": "23.",
+      "ours_answer": "The phrase \"value-added tax\" appears 6 times in the document text.",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "152",
+      "question": "What is the major message conveyed in page 1 (page 3 of the document?)",
+      "gold": "The document is a report from the Law Library of Congress outlining legislation related to the legalization or regulation of drugs in the U.S. introduced in the",
+      "ours_answer": "The major message conveyed on Page 1—the title/disclaimer page of the legislative research report—is that the document is a non-binding, informational reference",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "154",
+      "question": "At which page does the appendix of this document start?",
+      "gold": "49 or 53.",
+      "ours_answer": "The appendix of this document starts on **page 52**, as confirmed by multiple sources: it is explicitly stated that the Appendix “begins on page 52—immediately ",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "155",
+      "question": "How many words does the report have?",
+      "gold": "4271.",
+      "ours_answer": "The report has approximately 4,346 words.",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "163",
+      "question": "How many times does the report mention VAT (value-added tax)?",
+      "gold": "74.",
+      "ours_answer": "The report does not mention the phrase “VAT (value-added tax)” — it exclusively uses the abbreviations “VAT” or the full term “value-added tax” separately, with",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "166",
+      "question": "How many words does the document have?",
+      "gold": "6588.",
+      "ours_answer": "The document has approximately 6,642 words.  \n\n### References\n\n- [1] 2023555902.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "168",
+      "question": "How many times does the document mention \"AI systems\"?",
+      "gold": "21.",
+      "ours_answer": "The document mentions \"AI systems\" 18 times.\n\n### References\n\n- [1] 2023555920.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "170",
+      "question": "From which page does the document start to state the situations of Asia?",
+      "gold": "66.",
+      "ours_answer": "The document starts to state the situations of Asia beginning on **page 13**, as indicated by the section heading **\"B. Countries Involved\"** under the \"China\" ",
+      "doc_meta_used": true,
+      "locate_used": true,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "171",
+      "question": "On which page does the document list the information about France?",
+      "gold": "7 or 9.",
+      "ours_answer": "The document lists information about France on page 18, as indicated by the table titled \"Majority Vote Requirements for Passage of Legislation in Selected Juri",
+      "doc_meta_used": true,
+      "locate_used": true,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "173",
+      "question": "From which page does the document present the information about Spain?",
+      "gold": "15 or 18.",
+      "ours_answer": "The document presents information about Spain starting on **Page 17**, where Graciela Rodriguez-Ferrand is cited as an author, the legal citation for *Real Decr",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "176",
+      "question": "How many words in total does the report have?",
+      "gold": "7866.",
+      "ours_answer": "The report has approximately 8,007 words in total.\n\n### References\n\n- [1] 2022666109.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "220",
+      "question": "How many figures are there in the frontpage?",
+      "gold": "9.",
+      "ours_answer": "The front page contains six figures: a portrait of George Santos, an image of a hand holding truffles on a forest floor, a photograph of two older men in vintag",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "191",
+      "question": "How many figures are included in the newspaper?",
+      "gold": "6",
+      "ours_answer": "The newspaper includes five figures: an image of urban commuters on escalators, a photograph of two black bear cubs climbing a tree, a depiction of a German IRI",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "206",
+      "question": "On what page can readers find the continuation of the story about Israeli forces entering the Gaza Strip?",
+      "gold": "Page 9.",
+      "ours_answer": "The continuation of the story about Israeli forces entering the Gaza Strip can be found on Page 11, as indicated by the text \"Continued on Page 11\" in the artic",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "210",
+      "question": "How many times are there in the frontpage?",
+      "gold": "1950.",
+      "ours_answer": "The front page of the document contains multiple sections including \"SUNDAY OPINION,\" \"SUNDAY BUSINESS,\" \"SUNDAY STYLES,\" and \"ARTS & LEISURE,\" with specific ar",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "217",
+      "question": "How many words are there in total in the frontpage?",
+      "gold": "1817.",
+      "ours_answer": "The front page of the newspaper contains approximately 1857 words, as computed from the extracted text of the document.\n\n### References\n\n- [1] 20230928.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "222",
+      "question": "What are the major news conveyed by the front page?",
+      "gold": "- Influential Pop artist Claes Oldenburg passed away at the age of 93.\n- The Stanislavchuk family reunited for the first time since the Ukrainian war began, ami",
+      "ours_answer": "The major news conveyed by the front page includes a historic heatwave affecting Britain and Europe, with temperatures nearing 100 degrees Fahrenheit in London,",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "226",
+      "question": "How many figures are there in the front page?",
+      "gold": "7.",
+      "ours_answer": "The front page of the newspaper contains five figures: a photograph of a rally in Santiago, Chile, for those who have disappeared; an image of flooded coastal c",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    }
+  ],
+  "ours_wrong_total": [
+    {
+      "doc_id": "0",
+      "question": "Who is the last author of the paper?",
+      "gold": "Sameer Singh",
+      "ours_answer": "The last author of the paper is Robert L. Logan IV.\n\n### References\n\n- [1] P19-1598.pdf",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "0",
+      "question": "On which page does the paper introduce the corpus statistics?",
+      "gold": "Page 5",
+      "ours_answer": "The paper introduces the corpus statistics on page 4, which corresponds to Section 3 titled \"Linked WikiText-2\". This section includes Table 2, which presents t",
+      "doc_meta_used": true,
+      "locate_used": true,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "0",
+      "question": "How many time does the paper mention WikiText-2?",
+      "gold": "31",
+      "ours_answer": "The paper mentions WikiText-2 28 times, as verified by the programmatic count of the phrase \"WikiText-2\" in the document text.\n\n### References\n\n- [1] P19-1598.p",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "2",
+      "question": "How many words are there in total in the paper?",
+      "gold": "3790",
+      "ours_answer": "The paper contains approximately 3,809 words in total.\n\n### References\n\n- [1] P19-1164.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "4",
+      "question": "What is the first sentence on page 5?",
+      "gold": "RetrieveNRefine obtains statistically significant wins over the retriever Memory Network model and the generator Seq2Seq model using a binomial two-tailed test,",
+      "ours_answer": "The first sentence on page 5 is \"RetNRef++ model has similar statistics to human utterances and provides more engaging conversations according to human judgment",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "6",
+      "question": "How many pages does the paper have, excluding references and appendix?",
+      "gold": "9",
+      "ours_answer": "The paper has 10 pages excluding references and appendix, as indicated by the logical page numbering from Page 1 to Page 10, with the References section beginni",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "9",
+      "question": "How many words in total of the page 1?",
+      "gold": "625",
+      "ours_answer": "The total number of words on page 1 is not explicitly stated in the provided context or document chunks, and no direct word count for page 1 is available from t",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "15",
+      "question": "How many authors are on the paper?",
+      "gold": "7",
+      "ours_answer": "The paper has five authors: Cristian Danescu-Niculescu-Mizil, Justine Zhang, Jonathan P. Chang, Lucas Dixon, and Yiqing Hua.\n\n### References\n\n- [1] P18-1125.pdf",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "15",
+      "question": "How many institutions are listed on the paper?",
+      "gold": "3",
+      "ours_answer": "The provided context does not contain any information about the number of institutions listed on the paper.\n\n### References",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "19",
+      "question": "How many references are there in the paper?",
+      "gold": "42.",
+      "ours_answer": "The paper contains 29 references, as indicated by the bibliographic reference list on page 9, which includes 29 scholarly citations supporting the paper’s techn",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "23",
+      "question": "On which page does the paper present the dataset sizes?",
+      "gold": "6 or 292.",
+      "ours_answer": "The paper presents the dataset sizes on page 5, where Table 1 and Table 2 are located, providing detailed statistics for WIKIHOP and MEDHOP datasets.\n\n### Refer",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "28",
+      "question": "How many sections are there in this paper?",
+      "gold": "6.",
+      "ours_answer": "The paper contains five main sections: Section 1 (Introduction), Section 2 (Related Work), Section 3 (Robust Word Recognition), Section 4 (Experimental Evaluati",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "31",
+      "question": "On which page does the paper detail the baseline models?",
+      "gold": "4 or 1702.",
+      "ours_answer": "The paper details the baseline models on Page 3, where Section 5, titled \"Baselines,\" discusses comparative performance of supervised versus transfer-based meth",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "32",
+      "question": "How many words does the paper have in total?",
+      "gold": "6586.",
+      "ours_answer": "The paper has approximately 6,538 words in total.\n\n### References\n\n- [1] N18-1187.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "35",
+      "question": "What is the brief summary of Section 2.1?",
+      "gold": "",
+      "ours_answer": "Section 2.1, titled \"Motivation,\" introduces the foundational rationale for the paper's proposed contextual augmentation framework by critiquing the limitations",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 1
+    },
+    {
+      "doc_id": "47",
+      "question": "How many tables are there in the paper?",
+      "gold": "7.",
+      "ours_answer": "The paper contains seven tables: Table 2, Table 3, Table 4, Table 5, Table 6, Table 7, and an unnamed table in the reference list.\n\n### References\n\n- [1] P18-10",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "37",
+      "question": "On which page does the paper detail the hyperparameter setting?",
+      "gold": "4 or 4765.",
+      "ours_answer": "The paper details the hyperparameter settings on Page 11, which is also marked with the page number 4773 in the footer. This page contains the section \"A.1 Trai",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "40",
+      "question": "On which page does the paper detail the hyperparameter settings?",
+      "gold": "6 or 429.",
+      "ours_answer": "The paper details the hyperparameter settings on Page 4, where the values for λs (λmul(s), λadv(s), λmul(c), λadv(c)) are specified as 10, 1, 3, and 0.03 respec",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "41",
+      "question": "What is the first sentence on page 4?",
+      "gold": "4.1 User Characteristics Extraction To depict how users participate in social networking, we employ their metadata and profiles to define the feature vector xj ",
+      "ours_answer": "The first sentence on page 4 cannot be determined from the provided context, as no text excerpt or content from page 4 is included in the Document Chunks or Kno",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "45",
+      "question": "How many footnotes in total does the paper have?",
+      "gold": "2.",
+      "ours_answer": "The paper has **three** footnotes in total: one on page 0 (footnote 1), one on page 6 (footnote 2), and one on page 7 (footnote 3).\n\n### References\n\n- [1] N19-1",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "46",
+      "question": "How many authors are listed in the paper?",
+      "gold": "11.",
+      "ours_answer": "The paper lists **12 authors**, as indicated by the author list in the CodeBERT paper, which includes Zhangyin Feng and Daya Guo marked with superscript asteris",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "50",
+      "question": "What is the main purpose of the last page in the document?",
+      "gold": "Signatures of the people listed in the document",
+      "ours_answer": "The main purpose of the last page in the document is to serve as a formal signature block for the UnitedHealth Group Incorporated's 2020 Form 10-K filing, certi",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "52",
+      "question": "How many people are listed in the company leadership?",
+      "gold": "34",
+      "ours_answer": "The company leadership section lists 12 executive officers, including Jon R. Moeller as Chairman of the Board, President and Chief Executive Officer, Shailesh G",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "52",
+      "question": "How many times does the paper mention the CEO's name?",
+      "gold": "11",
+      "ours_answer": "The paper mentions the CEO's name, Jon R. Moeller, multiple times across various sections, including his signature on the Form 10-K filing dated August 5, 2022,",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "54",
+      "question": "How many times does the report mention the name of Global relationship partner?",
+      "gold": "4",
+      "ours_answer": "The report mentions the name of Global relationship partner 0 times, as verified by the document text.\n\n### References\n\n- [1] NYSE_NVS_2021.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "55",
+      "question": "How many parts does the report consist of?",
+      "gold": "3",
+      "ours_answer": "The report consists of two main parts: Part I, which contains business-related disclosures (including Items 1 through 4), and Part II, which contains financial ",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "58",
+      "question": "What is the main content presented in the final page?",
+      "gold": "Valuation and qualifying accounts",
+      "ours_answer": "The final page of the document, which is Page 170, contains the \"SIGNATURES\" section, as indicated by the context that mentions the \"SIGNATURES\" section appears",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "59",
+      "question": "How many sustainability and community hightlights are showed in page 4?",
+      "gold": "9",
+      "ours_answer": "The Sustainability & Community Highlights section is not located on Page 4 of the PepsiCo Annual Report 2020; instead, it spans pages 2–3 and contains dense dat",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "59",
+      "question": "On which page does the CEO's letter to the shareholders begin?",
+      "gold": "Page 5",
+      "ours_answer": "The CEO's letter to the shareholders begins on Page 4, marked by the header \"Dear Fellow Shareholders,\" which serves as the formal salutation and structural ope",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "66",
+      "question": "What is the topic of contents on page 4?",
+      "gold": "Highlights in 2020",
+      "ours_answer": "The topic of contents on page 4 is the transition from preliminary front matter to core organizational disclosure, serving as a structural pivot between the 'Fi",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "67",
+      "question": "On which pages does the report provide the information about executive officers?",
+      "gold": "From 10 to 11. OR From 14 to 15.",
+      "ours_answer": "The report provides information about executive officers on pages 10 to 14, with the section titled \"Information about our Executive Officers\" beginning on page",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "68",
+      "question": "What does page 23 mainly talk about?",
+      "gold": "This page from Novo Nordisk's Annual Report 2020 discusses advances in their pharmaceutical research and development, highlighting regulatory approvals and clin",
+      "ours_answer": "Page 23 of the Novo Nordisk Annual Report 2020 primarily serves as a structural and navigational transition point, featuring a multi-level hierarchical header t",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "69",
+      "question": "What is the primary focus of the content on page 173?",
+      "gold": "This page details Wells Fargo's involvement in various legal proceedings and investigations related to their business activities, including antitrust litigation",
+      "ours_answer": "The primary focus of the content on page 173 is the continuation of Note 15: Legal Actions, which details material litigation and regulatory matters involving W",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 1
+    },
+    {
+      "doc_id": "70",
+      "question": "How many times does the paper mention \"total revenue\"?",
+      "gold": "108.",
+      "ours_answer": "The paper mentions \"total revenue\" 19 times, as confirmed by the programmatic verification of the document text.\n\n### References\n\n- [1] NYSE_SHLX_2020.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "72",
+      "question": "What is the major topic of the content on page 37?",
+      "gold": "The major topic of this page is the authorization granted to the Managing Board of Siemens Healthineers AG to issue and repurchase shares.",
+      "ours_answer": "The major topic of the content on page 37 is the statutory disclosure of takeover-relevant information and explanatory report, which includes detailed provision",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "75",
+      "question": "On which page does the document present the signature part?",
+      "gold": "page 59.",
+      "ours_answer": "The document presents the signature part on Page 58, which contains the 'SIGNATURES' section immediately following the F-19 identifier and includes statutory ce",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "76",
+      "question": "What is the primary focus of page 41?",
+      "gold": "This page primarily discusses Qualcomm's financial performance in fiscal 2021, highlighting a significant increase in revenues and net income compared to fiscal",
+      "ours_answer": "The primary focus of page 41 is to introduce the \"Results of Operations\" section by presenting a quantitative analysis of Qualcomm's revenue performance for fis",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 1
+    },
+    {
+      "doc_id": "78",
+      "question": "What is the brief summary of page 43 in the document?",
+      "gold": "Chevron Corporation's 2021 Annual Report page 43 discusses the company's liquidity and capital resources, highlighting a strong balance sheet, an increase in ca",
+      "ours_answer": "Page 43 of the Chevron Corporation 2021 Annual Report contains the header \"Management's Discussion and Analysis of Financial Condition and Results of Operations",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "79",
+      "question": "On which page does the document report the information about executive officers?",
+      "gold": "8 or 14.",
+      "ours_answer": "The document reports information about executive officers on Page 12, which is the physical page containing the \"Executive Officers\" section, and this section i",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "81",
+      "question": "How many words are there in total in the document?",
+      "gold": "123076.",
+      "ours_answer": "The total number of words in the document is approximately 127,198.\n\n### References\n\n- [1] OTC_TCS_2020.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "85",
+      "question": "On which page does the report detail the information about independent director?",
+      "gold": "page 5.",
+      "ours_answer": "The report details information about the independent director, ONG Yih Ching, on page 6, where his profile and role as an acting chair are described in the \"Boa",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "221",
+      "question": "How many words are there in the document?",
+      "gold": "2180.",
+      "ours_answer": "The document contains approximately 2,458 words.\n\n### References\n\n- [1] ASX_AJY_2020.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "86",
+      "question": "What is the primary message conveyed on page 11 in the document?",
+      "gold": "Accenture plc's Class A ordinary shares are traded on the New York Stock Exchange under the symbol ACN and that the company provides its financial reports and o",
+      "ours_answer": "The primary message conveyed on Page 11 is that it serves as a **regulatory transition page**, functioning as a numerically labeled, content-sparse structural b",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "91",
+      "question": "What does the appendices include?",
+      "gold": "(1) Abbreviations and Acronyms; (2) Department of State Locations; (3) Acknowledgements and Contact Information; (4) Websites of Interest",
+      "ours_answer": "The appendices of the Fiscal Year 2020 Agency Financial Report include supplementary materials such as a glossary of abbreviations and acronyms, a global map of",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "92",
+      "question": "By which department was the report released?",
+      "gold": "Geospatial Data Strategy",
+      "ours_answer": "The report was released by the United States Department of State.",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "100",
+      "question": "On which page mentions the guiding principles?",
+      "gold": "16",
+      "ours_answer": "The Guiding Principles are mentioned on Page 4, where they are formally introduced as part of the Executive Summary and strategic framework, and on Page 5, whic",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "102",
+      "question": "What is the page range for the 'Bureau Goals and Objectives' section?",
+      "gold": "Page 7 to 16",
+      "ours_answer": "The 'Bureau Goals and Objectives' section begins on **Page 6**, directly following the 'FOR PUBLIC RELEASE' header on Page 5, and includes detailed goals such a",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "108",
+      "question": "How many times does the report mention \"PM\"?",
+      "gold": "86.",
+      "ours_answer": "The report mentions \"PM\" 106 times.",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "110",
+      "question": "How many chapters are there in total in the document?",
+      "gold": "6.",
+      "ours_answer": "The document contains at least six chapters, as explicitly referenced in the knowledge base: Chapter 1 (“AFRICA”), Chapter 2 (“State Sponsors of Terrorism”), Ch",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "111",
+      "question": "What is the main content of the last three pages of the document?",
+      "gold": "The last three pages outline a goal to empower the workforce by fostering a diverse, equitable, inclusive, and flexible environment, highlighting areas for impr",
+      "ours_answer": "The last three pages of the document—Pages 16, 17, and 18—collectively contain Bureau Objectives 3.2–3.4 (ethics staffing, foreign assistance compliance, and re",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "112",
+      "question": "What is the main content of the second-to-last page of the document?",
+      "gold": "The page discusses the U.S. Bureau of International Security and Nonproliferation's (ISN) objective to enhance Diversity, Equity, Inclusion, and Accessibility (",
+      "ours_answer": "The second-to-last page of the document—Page 26 of 27—is a structural metadata artifact positioned in the bottom-right margin, serving as navigational and seque",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "114",
+      "question": "How many tables and figures are there in total in the document?",
+      "gold": "31.",
+      "ours_answer": "The document contains a total of 8 tables and 23 figures, as explicitly listed in Appendix C titled \"Tables, Figures, and Image Credits,\" which catalogs all vis",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "115",
+      "question": "On which page does the report detail the Bureau Objective 4.2?",
+      "gold": "14 or 16.",
+      "ours_answer": "Bureau Objective 4.2 is detailed on **Page 15 of 17**, which physically appears on page index 16 and hosts the objective’s justification, linkages to the Joint ",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "115",
+      "question": "How many times does the document mention \"DS\"?",
+      "gold": "76.",
+      "ours_answer": "The phrase \"DS\" appears 88 times in the document text.",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "116",
+      "question": "What is the major message conveyed in the last page?",
+      "gold": "S/GWI recognizes the risk of ineffective performance monitoring and the importance of integrating gender analysis into the strategic planning process of the dep",
+      "ours_answer": "The major message conveyed on the last page (Page 22 of 22) is the conclusion of the Office of Global Women’s Issues’ (S/GWI) draft Joint Strategic Plan-aligned",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "118",
+      "question": "What institution or agency released the report?",
+      "gold": "Functional Bureau Strategy.",
+      "ours_answer": "The report was released by the **U.S. Department of State**, specifically through its **Office of Foreign Missions (OFM)**, a bureau within the Department respo",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "121",
+      "question": "What is the main content of the last page of the document?",
+      "gold": "The page highlights the importance of information, knowledge, and data management systems for the Bureau of Population, Refugees, and Migration (PRM) to enable ",
+      "ours_answer": "The main content of the last page of the document—identified as **Page 21 of 21**, the terminal pagination marker—is the conclusion of the Bureau’s Cross-Cuttin",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 1
+    },
+    {
+      "doc_id": "123",
+      "question": "How many footnotes are there in this document?",
+      "gold": "31.",
+      "ours_answer": "The document contains at least 29 footnotes, as evidenced by the highest numbered footnote explicitly referenced in the knowledge base—footnote 29, which cites ",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "125",
+      "question": "On which page does the document present the signature of US District Judge?",
+      "gold": "7.",
+      "ours_answer": "The document presents the signature of U.S. District Judge Oldon C. Fallon on **Page 6**, as confirmed by the header “Case 2:23-cv-06661-EEF-JVM Document 14 Fil",
+      "doc_meta_used": true,
+      "locate_used": true,
+      "baseline_acc": 1
+    },
+    {
+      "doc_id": "126",
+      "question": "What page of the document outlines the \"Bureau Strategic Framework\"?",
+      "gold": "Page 3.",
+      "ours_answer": "The \"Bureau Strategic Framework\" is outlined on **Page 4 of 22**, which serves as the first full exposition of the Bureau’s Strategic Framework, containing Goal",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "128",
+      "question": "What page does the Bureau Strategic Framework section begin on?",
+      "gold": "Page 5.",
+      "ours_answer": "The Bureau Strategic Framework section begins on **Page 6**, as confirmed by multiple sources in the context: it is explicitly stated that “The Bureau Strategic",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "134",
+      "question": "How many footnotes does the report have?",
+      "gold": "136",
+      "ours_answer": "The report contains at least 136 footnotes, as evidenced by the highest-numbered footnote explicitly cited in the context—Footnote 136, which references a *Glob",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "140",
+      "question": "How many countries are covered in the report?",
+      "gold": "15",
+      "ours_answer": "The report covers 16 G-20 countries, including Argentina, Australia, Brazil, Canada, China, Germany, India, Italy, Japan, Mexico, Russia, Saudi Arabia, South Af",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "141",
+      "question": "How many words are there in total in the file?",
+      "gold": "1508",
+      "ours_answer": "The file contains approximately 1,537 words in total.\n\n### References\n\n- [1] 2020714994.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "142",
+      "question": "How many countries listed in the report are not from European Union?",
+      "gold": "11",
+      "ours_answer": "The report lists 11 countries outside the European Union that have enacted legislation containing a net zero emissions goal, with two of them setting a target d",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 1
+    },
+    {
+      "doc_id": "175",
+      "question": "How many words does the document have in total?",
+      "gold": "2979.",
+      "ours_answer": "The document has approximately 2998 words in total.",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "149",
+      "question": "How many regions are mentioned on the document's cover?",
+      "gold": "6.",
+      "ours_answer": "The document's cover does not mention any regions, as the provided context contains no information about the cover page listing or describing regions; instead, ",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "150",
+      "question": "How many times does the report mention \"scientific ethics\"?",
+      "gold": "11.",
+      "ours_answer": "The report mentions \"scientific ethics\" 9 times.  \n\n### References\n\n- [1] 2023555925.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "151",
+      "question": "How many times does the document mention \"value-added tax\"?",
+      "gold": "23.",
+      "ours_answer": "The phrase \"value-added tax\" appears 6 times in the document text.",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "152",
+      "question": "What is the major message conveyed in page 1 (page 3 of the document?)",
+      "gold": "The document is a report from the Law Library of Congress outlining legislation related to the legalization or regulation of drugs in the U.S. introduced in the",
+      "ours_answer": "The major message conveyed on Page 1—the title/disclaimer page of the legislative research report—is that the document is a non-binding, informational reference",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "154",
+      "question": "At which page does the appendix of this document start?",
+      "gold": "49 or 53.",
+      "ours_answer": "The appendix of this document starts on **page 52**, as confirmed by multiple sources: it is explicitly stated that the Appendix “begins on page 52—immediately ",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "155",
+      "question": "How many words does the report have?",
+      "gold": "4271.",
+      "ours_answer": "The report has approximately 4,346 words.",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "161",
+      "question": "How many regions are listed on the document's cover?",
+      "gold": "20.",
+      "ours_answer": "The document's cover does not list any regions; instead, it features a world map with color-coded countries categorized by their legal responses to \"fake news\" ",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "158",
+      "question": "How many footnotes are there in the section about Brazil in this report?",
+      "gold": "43.",
+      "ours_answer": "The section about Brazil in the report contains **16 footnotes**, as evidenced by the highest numbered footnote cited in the Brazil-related content—footnote 16,",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "163",
+      "question": "When was the document released?",
+      "gold": "On January 2021.",
+      "ours_answer": "The document was released in 2021, as indicated by the publication year of the cited chapter “Blockchain & Cryptocurrency Regulation 2021: United Kingdom” and t",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "163",
+      "question": "How many times does the report mention VAT (value-added tax)?",
+      "gold": "74.",
+      "ours_answer": "The report does not mention the phrase “VAT (value-added tax)” — it exclusively uses the abbreviations “VAT” or the full term “value-added tax” separately, with",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "164",
+      "question": "How many subsections does Section III have?",
+      "gold": "4.",
+      "ours_answer": "Section III has three subsections: Section III.A (discussing regulatory obligations derived from the PRC Cybersecurity Law), Section III.B (titled “Data Securit",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "165",
+      "question": "How many regions are listed on the cover?",
+      "gold": "17.",
+      "ours_answer": "The provided context and images do not contain any information about a cover or regions listed on it. Therefore, I cannot determine how many regions are listed ",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "166",
+      "question": "How many words does the document have?",
+      "gold": "6588.",
+      "ours_answer": "The document has approximately 6,642 words.  \n\n### References\n\n- [1] 2023555902.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "168",
+      "question": "How many times does the document mention \"AI systems\"?",
+      "gold": "21.",
+      "ours_answer": "The document mentions \"AI systems\" 18 times.\n\n### References\n\n- [1] 2023555920.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "170",
+      "question": "From which page does the document start to state the situations of Asia?",
+      "gold": "66.",
+      "ours_answer": "The document starts to state the situations of Asia beginning on **page 13**, as indicated by the section heading **\"B. Countries Involved\"** under the \"China\" ",
+      "doc_meta_used": true,
+      "locate_used": true,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "171",
+      "question": "On which page does the document list the information about France?",
+      "gold": "7 or 9.",
+      "ours_answer": "The document lists information about France on page 18, as indicated by the table titled \"Majority Vote Requirements for Passage of Legislation in Selected Juri",
+      "doc_meta_used": true,
+      "locate_used": true,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "173",
+      "question": "From which page does the document present the information about Spain?",
+      "gold": "15 or 18.",
+      "ours_answer": "The document presents information about Spain starting on **Page 17**, where Graciela Rodriguez-Ferrand is cited as an author, the legal citation for *Real Decr",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "176",
+      "question": "How many words in total does the report have?",
+      "gold": "7866.",
+      "ours_answer": "The report has approximately 8,007 words in total.\n\n### References\n\n- [1] 2022666109.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "220",
+      "question": "How many figures are there in the frontpage?",
+      "gold": "9.",
+      "ours_answer": "The front page contains six figures: a portrait of George Santos, an image of a hand holding truffles on a forest floor, a photograph of two older men in vintag",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "191",
+      "question": "How many figures are included in the newspaper?",
+      "gold": "6",
+      "ours_answer": "The newspaper includes five figures: an image of urban commuters on escalators, a photograph of two black bear cubs climbing a tree, a depiction of a German IRI",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "191",
+      "question": "What is the newspaper volume number?",
+      "gold": "No. 59575",
+      "ours_answer": "The newspaper volume number is CLXXII, as indicated in the header of the New York Times edition dated October 13, 2022.\n\n### References\n\n- [1] 20221013.pdf",
+      "doc_meta_used": false,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "206",
+      "question": "On what page can readers find the continuation of the story about Israeli forces entering the Gaza Strip?",
+      "gold": "Page 9.",
+      "ours_answer": "The continuation of the story about Israeli forces entering the Gaza Strip can be found on Page 11, as indicated by the text \"Continued on Page 11\" in the artic",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "210",
+      "question": "How many times are there in the frontpage?",
+      "gold": "1950.",
+      "ours_answer": "The front page of the document contains multiple sections including \"SUNDAY OPINION,\" \"SUNDAY BUSINESS,\" \"SUNDAY STYLES,\" and \"ARTS & LEISURE,\" with specific ar",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "217",
+      "question": "How many words are there in total in the frontpage?",
+      "gold": "1817.",
+      "ours_answer": "The front page of the newspaper contains approximately 1857 words, as computed from the extracted text of the document.\n\n### References\n\n- [1] 20230928.pdf",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "222",
+      "question": "What are the major news conveyed by the front page?",
+      "gold": "- Influential Pop artist Claes Oldenburg passed away at the age of 93.\n- The Stanislavchuk family reunited for the first time since the Ukrainian war began, ami",
+      "ours_answer": "The major news conveyed by the front page includes a historic heatwave affecting Britain and Europe, with temperatures nearing 100 degrees Fahrenheit in London,",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    },
+    {
+      "doc_id": "226",
+      "question": "How many figures are there in the front page?",
+      "gold": "7.",
+      "ours_answer": "The front page of the newspaper contains five figures: a photograph of a rally in Santiago, Chile, for those who have disappeared; an image of flooded coastal c",
+      "doc_meta_used": true,
+      "locate_used": false,
+      "baseline_acc": 0
+    }
+  ]
+}

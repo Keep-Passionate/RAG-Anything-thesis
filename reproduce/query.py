@@ -309,7 +309,16 @@ async def process_with_rag(
             q_llm = q
             meta_used = False
             locate_used = False
-            if op_ctx is not None:
+            if env_on("ENABLE_DG_CORE"):
+                # —— 统一框架 dg_core：单入口 路由→DocumentModel→确定性 resolver→Fact→低置信弃权 ——
+                # 取代下面散落的 op/关键词/locate 路由;默认关,零回归;子集 A/B 验证后再设默认。
+                from dg_core import ground as _dg_ground
+                _fact = _dg_ground(q, file_path)
+                if _fact:
+                    q_llm = f"{q}\n\n{_fact.note}"
+                    meta_used = _fact.kind != "locate"
+                    locate_used = _fact.kind == "locate"
+            elif op_ctx is not None:
                 # —— 工具库路由：dispatch 搞定 DSG(mention/element/meta) + Locate ——
                 from doc_operators import dispatch
                 op_ctx.kw_visual, op_ctx.kw_table = kw_visual, kw_table
@@ -379,7 +388,7 @@ async def process_with_rag(
             # doc_locate：问"X 在第几页"的题，注入"章节标题→页码"索引（Localization）。
             # 与 DSG/outline/anchor 独立、纯加法；无标题索引则不注入（对 baseline 零风险）。
             # op 层开时 locate 已在上面的 dispatch 内处理，这里只在 op 层关时走原路由。
-            if op_ctx is None and locate_index and detect_location_intent(q):
+            if op_ctx is None and not env_on("ENABLE_DG_CORE") and locate_index and detect_location_intent(q):
                 lnote = format_locate_note(locate_index)
                 if lnote:
                     q_llm = f"{q_llm}\n\n{lnote}"

@@ -1,0 +1,322 @@
+{
+  "top_n": 50,
+  "exclude_ids": [
+    "161",
+    "187",
+    "203",
+    "210"
+  ],
+  "total_docs": 229,
+  "total_meta_questions": 258,
+  "subset_meta_questions": 103,
+  "type_totals": {
+    "text-only": 412,
+    "multimodal-t": 220,
+    "meta-data": 258,
+    "multimodal-f": 88,
+    "unanswerable": 117,
+    "una-web": 7
+  },
+  "subset": [
+    {
+      "doc_id": "0",
+      "pdf": "P19-1598.pdf",
+      "meta_questions": 3,
+      "total_questions": 7
+    },
+    {
+      "doc_id": "102",
+      "pdf": "FBS_CDP_Public.pdf",
+      "meta_questions": 3,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "119",
+      "pdf": "FBS_OBO_27APR2023v2_PUBLIC.pdf",
+      "meta_questions": 3,
+      "total_questions": 5
+    },
+    {
+      "doc_id": "2",
+      "pdf": "P19-1164.pdf",
+      "meta_questions": 2,
+      "total_questions": 5
+    },
+    {
+      "doc_id": "3",
+      "pdf": "D19-1539.pdf",
+      "meta_questions": 2,
+      "total_questions": 8
+    },
+    {
+      "doc_id": "11",
+      "pdf": "D18-1360.pdf",
+      "meta_questions": 2,
+      "total_questions": 6
+    },
+    {
+      "doc_id": "15",
+      "pdf": "P18-1125.pdf",
+      "meta_questions": 2,
+      "total_questions": 3
+    },
+    {
+      "doc_id": "32",
+      "pdf": "N18-1187.pdf",
+      "meta_questions": 2,
+      "total_questions": 7
+    },
+    {
+      "doc_id": "52",
+      "pdf": "NYSE_PG_2022.pdf",
+      "meta_questions": 2,
+      "total_questions": 7
+    },
+    {
+      "doc_id": "54",
+      "pdf": "NYSE_NVS_2021.pdf",
+      "meta_questions": 2,
+      "total_questions": 8
+    },
+    {
+      "doc_id": "59",
+      "pdf": "NYSE_PEP_2020.pdf",
+      "meta_questions": 2,
+      "total_questions": 6
+    },
+    {
+      "doc_id": "69",
+      "pdf": "NYSE_WFC_2021.pdf",
+      "meta_questions": 2,
+      "total_questions": 6
+    },
+    {
+      "doc_id": "77",
+      "pdf": "NYSE_MCD_2020.pdf",
+      "meta_questions": 2,
+      "total_questions": 8
+    },
+    {
+      "doc_id": "85",
+      "pdf": "ASX_AJY_2020.pdf",
+      "meta_questions": 2,
+      "total_questions": 8
+    },
+    {
+      "doc_id": "86",
+      "pdf": "NYSE_ACN_2020.pdf",
+      "meta_questions": 2,
+      "total_questions": 11
+    },
+    {
+      "doc_id": "91",
+      "pdf": "FY-2020-Agency-Financial-Report.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "92",
+      "pdf": "DoS-Geospatial-Data-Strategy_Digital-Version_Accessible-9162021-with-Signature-page_Accessible-9222021.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "100",
+      "pdf": "Reference-EDS-Accessible.pdf",
+      "meta_questions": 2,
+      "total_questions": 3
+    },
+    {
+      "doc_id": "108",
+      "pdf": "FBS_PM_29NOV2023_Public.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "109",
+      "pdf": "JRS-EAP-Asia_06JAN2023_Public.pdf",
+      "meta_questions": 2,
+      "total_questions": 5
+    },
+    {
+      "doc_id": "110",
+      "pdf": "Country_Reports_on_Terrorism_2020.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "111",
+      "pdf": "FBS_L_27JAN2022_PUBLIC-1.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "112",
+      "pdf": "FBS_ISN_Public.pdf",
+      "meta_questions": 2,
+      "total_questions": 3
+    },
+    {
+      "doc_id": "113",
+      "pdf": "FBS_INL_Public.pdf",
+      "meta_questions": 2,
+      "total_questions": 5
+    },
+    {
+      "doc_id": "114",
+      "pdf": "DOS-FY2023-Agency-Financial-Report-508.pdf",
+      "meta_questions": 2,
+      "total_questions": 5
+    },
+    {
+      "doc_id": "115",
+      "pdf": "FBS_DS_10JAN2022_PUBLICv2.pdf",
+      "meta_questions": 2,
+      "total_questions": 3
+    },
+    {
+      "doc_id": "116",
+      "pdf": "FBS_S_GWI_Public.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "117",
+      "pdf": "FBS_S_GAC_Public.pdf",
+      "meta_questions": 2,
+      "total_questions": 5
+    },
+    {
+      "doc_id": "118",
+      "pdf": "FBS_OFM_10JAN2022_PUBLIC.pdf",
+      "meta_questions": 2,
+      "total_questions": 3
+    },
+    {
+      "doc_id": "120",
+      "pdf": "Country_Reports_2021_Complete_MASTER.no_maps-011323-Accessible.pdf",
+      "meta_questions": 2,
+      "total_questions": 5
+    },
+    {
+      "doc_id": "121",
+      "pdf": "FBS_PRM_Public.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "122",
+      "pdf": "JRS-AF_JRS_FINAL_Formatted_Public-Version.pdf",
+      "meta_questions": 2,
+      "total_questions": 6
+    },
+    {
+      "doc_id": "123",
+      "pdf": "USCOURTS-laed-2_23-cv-02060-0.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "124",
+      "pdf": "JRS-NEA-ME_JRS_FINAL_Formatted_Public-Version-1.pdf",
+      "meta_questions": 2,
+      "total_questions": 3
+    },
+    {
+      "doc_id": "125",
+      "pdf": "USCOURTS-laed-2_23-cv-06661-0.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "145",
+      "pdf": "2023555915.pdf",
+      "meta_questions": 2,
+      "total_questions": 3
+    },
+    {
+      "doc_id": "148",
+      "pdf": "2023555914.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "150",
+      "pdf": "2023555925.pdf",
+      "meta_questions": 2,
+      "total_questions": 6
+    },
+    {
+      "doc_id": "154",
+      "pdf": "2022666112.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "155",
+      "pdf": "2020714998.pdf",
+      "meta_questions": 2,
+      "total_questions": 3
+    },
+    {
+      "doc_id": "157",
+      "pdf": "2023555935.pdf",
+      "meta_questions": 2,
+      "total_questions": 6
+    },
+    {
+      "doc_id": "158",
+      "pdf": "2021699566.pdf",
+      "meta_questions": 2,
+      "total_questions": 6
+    },
+    {
+      "doc_id": "159",
+      "pdf": "2023555932.pdf",
+      "meta_questions": 2,
+      "total_questions": 5
+    },
+    {
+      "doc_id": "160",
+      "pdf": "2021700463.pdf",
+      "meta_questions": 2,
+      "total_questions": 5
+    },
+    {
+      "doc_id": "162",
+      "pdf": "2020714997.pdf",
+      "meta_questions": 2,
+      "total_questions": 2
+    },
+    {
+      "doc_id": "163",
+      "pdf": "2021666100.pdf",
+      "meta_questions": 2,
+      "total_questions": 5
+    },
+    {
+      "doc_id": "164",
+      "pdf": "2023555933.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "165",
+      "pdf": "2023555934.pdf",
+      "meta_questions": 2,
+      "total_questions": 4
+    },
+    {
+      "doc_id": "166",
+      "pdf": "2023555902.pdf",
+      "meta_questions": 2,
+      "total_questions": 5
+    },
+    {
+      "doc_id": "167",
+      "pdf": "2023555905.pdf",
+      "meta_questions": 2,
+      "total_questions": 5
+    }
+  ]
+}
