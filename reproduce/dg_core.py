@@ -376,10 +376,11 @@ def r_words(m: DocModel, q: str) -> Fact | None:
                     f"[Approximate word count on {m.page_map.frame(int(pr.group(1)))} "
                     f"(from extracted text) = {wc}.]", "pdf")
     wc = len(m.full_text.split())
-    # 词数口径不可观测 -> 低置信(approximate),仅作参考、不贬低检索
-    return Fact("words", wc, 0.4,
-                f"[Approximate total word count (from extracted text) = {wc}; "
-                f"this is an estimate and the reference count may differ slightly.]", "pdf")
+    # 校准发现:金标词数 = PyMuPDF 全文按空白切分的计数,基本精确(开发集 6/9 完全命中、其余差≤10)。
+    # 故由"一律弃权"改为注入,措辞改肯定。仅用 PyMuPDF 文本(与金标同源);pypdf 兜底时口径可能偏。
+    return Fact("words", wc, 0.85,
+                f"[Programmatically counted: the document contains {wc} words "
+                f"(whitespace-delimited tokens over the extracted text).]", "pdf")
 
 
 def _appendix_page(m: DocModel):
@@ -645,7 +646,8 @@ _THRESHOLD = {
     "locate": 0.4,        # 命中标题(0.9)或 ≤2 页(0.5)才注入,3+ 页歧义则弃权
     "elements": 0.8, "elements_sum": 0.8,   # 真实图表数 ≤ ~页数;计数>1.25×页数=被切碎→弃权
     "references": 0.99, "sections": 0.99,    # 口径不可观测 -> 默认弃权
-    "words": 0.99, "words_page": 0.99, "footnotes": 0.99, "meta_stats": 0.99,
+    "words": 0.6,                            # 校准:词数=PyMuPDF计数,基本精确 -> 放开注入
+    "words_page": 0.99, "footnotes": 0.99, "meta_stats": 0.99,   # 单页词数/脚注仍弃权(未验证)
 }
 # 默认阈值 0.99 的几类 = 实际弃权(诚实负向);经子集校准证明某类真赢后再单独调低开启。
 
