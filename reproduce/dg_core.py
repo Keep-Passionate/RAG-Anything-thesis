@@ -109,6 +109,27 @@ def detect_page_offset(doc) -> PageMap:
     return PageMap(physical_count=n, offset=best_k, confidence=round(best_sup / numbered, 3))
 
 
+def _offset_from_page_numbers(elements, page_count: int):
+    """从 content_list 的 page_number 元素(解析器自带页码标注)推断偏移——比页脚坐标更干净。
+    offset = 物理页(page_idx+1) − 印刷号;多数元素一致即高置信。论文 anthology 大页号(5962)
+    → offset 为负 → 自动拒绝(offset 0,退回"物理=题面页")。"""
+    cands = []
+    for it in elements:
+        if it.get("type") != "page_number":
+            continue
+        t = str(it.get("text", "")).strip()
+        pg = it.get("page_idx")
+        if t.isdigit() and isinstance(pg, int):
+            cands.append((pg + 1) - int(t))
+    if not cands:
+        return None
+    from collections import Counter
+    off, n = Counter(cands).most_common(1)[0]
+    if off <= 0:
+        return PageMap(physical_count=page_count, offset=0, confidence=0.0)
+    return PageMap(physical_count=page_count, offset=off, confidence=round(n / len(cands), 3))
+
+
 def _norm_caption(it: dict) -> str:
     """取元素的标题/正文文本(图表 caption / 正文),拼成可搜索串。"""
     parts = []
@@ -203,6 +224,11 @@ def build_doc_model(pdf_path: str, content_list_path: str = None) -> DocModel | 
                 elements = [it for it in json.load(f) if isinstance(it, dict)]
         except Exception:
             elements = []
+    # PageMap 双源:页脚坐标法 vs 解析器 page_number 元素法,取更自洽(置信更高)的一个。
+    if elements:
+        pm_elem = _offset_from_page_numbers(elements, pm.physical_count)
+        if pm_elem is not None and pm_elem.confidence > pm.confidence:
+            pm = pm_elem
     return DocModel(pdf_path=pdf_path, page_count=pm.physical_count, page_map=pm,
                     per_page_text=per_page, elements=elements)
 
