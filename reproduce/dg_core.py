@@ -377,8 +377,9 @@ def r_elements(m: DocModel, q: str) -> Fact | None:
                 "equation": ("equation",), "equations": ("equation",),
                 "chart": ("chart",), "charts": ("chart",),
                 "illustration": ("image",), "illustrations": ("image",)}
-    # MinerU 图元素在长报告里被切成碎片(doc114:160 图碎片/gold 31),只在论文体量(短)文档可信。
-    if m.page_count > 25:
+    # 方法学边界(诚实写进论文):MinerU 对长多栏报告会把图切成碎片(doc114:184页/230碎片/gold31),
+    # 元素解析仅在论文体量文档可信 → 长文档对"图/表计数"一律弃权(文档类作用域,非按题特调)。
+    if m.page_count > 30:
         return None
     types = type_map.get(kind, ("image",))
     ap = _appendix_page(m) if re.search(r"excluding|without|except", q, re.I) else None
@@ -392,23 +393,23 @@ def r_elements(m: DocModel, q: str) -> Fact | None:
                 c += 1
         return c
 
-    # 理智门:图/表数远超页数 = MinerU 把装饰图标/表格碎片当元素了(报告类常见)-> 弃权,别注入荒谬值。
-    # 论文图表数 << 页数,不受影响(治 doc114:160 图碎片;保 doc47:7 表)。
-    def _sane(c):
-        return c <= m.page_count
+    # 实例级置信 = 合理度 min(1, 页数/计数):论文图表数 << 页数 → conf 高;计数 ≫ 页数(残余碎片)
+    # (计数 ≫ 页数,如 doc114 160图/gold31)→ conf 低 → 弃权。比"页数>25 硬弃权"更平滑、更少题目特异。
+    def _conf(c):
+        return round(min(1.0, m.page_count / c), 2) if c else 0.0
 
     if re.search(r"tables?\s+and\s+(figures?|images?)|figures?\s+and\s+tables?", q, re.I):
         figs, tbls = _count(("image", "chart")), _count(("table",))
-        if not (_sane(figs) and _sane(tbls)):
-            return None
         total = figs + tbls
-        return Fact("elements_sum", total, 0.6,
+        if total < 1:
+            return None
+        return Fact("elements_sum", total, _conf(total),
                     f"[Programmatically counted from the parsed document: {figs} figures + "
                     f"{tbls} tables = {total} in total.]", "content_list")
     cnt = _count(types)
-    if cnt < 1 or not _sane(cnt):
-        return None  # 0 个或多到不合理 -> 弃权
-    return Fact("elements", cnt, 0.65,
+    if cnt < 1:
+        return None
+    return Fact("elements", cnt, _conf(cnt),
                 f"[Programmatically counted from the parsed document: {cnt} {kind}.]", "content_list")
 
 
@@ -492,7 +493,10 @@ def r_abbrev_words(m: DocModel, q: str) -> Fact | None:
         if not abv:
             return None
         ab, cnt = abv[0]
-        return Fact("abbrev", ab, 0.7,
+        # 实例级置信 = 头名领先度:第一名比第二名领先越多越确定;并列(易选错)→低置信→弃权。
+        f2 = abv[1][1] if len(abv) > 1 else 0
+        conf = round(1.0 - (f2 / cnt), 2) if cnt else 0.0
+        return Fact("abbrev", ab, conf,
                     f'[Programmatically computed: the most frequent abbreviation/acronym is "{ab}" '
                     f"({cnt} occurrences).]", "pdf")
     tw = s.get("top_words") or []
@@ -510,21 +514,30 @@ def r_locate(m: DocModel, q: str) -> Fact | None:
     if not target:
         return None
     tl = target.lower()
-    pages = []
-    # 先在 content_list 元素(文本+caption)里搜,再退回逐页文本
+    # 区分"命中标题"与"命中正文":命中章节标题=高确定;只在正文出现=按命中页数定确定度。
+    heading_pages, body_pages = [], []
     if m.has_elements:
         for it in m.elements:
-            blob = _norm_caption(it).lower()
             pg = it.get("page_idx")
-            if isinstance(pg, int) and tl in blob and (pg + 1) not in pages:
-                pages.append(pg + 1)
-    if not pages:
+            if not isinstance(pg, int):
+                continue
+            if it.get("text_level") and tl in str(it.get("text", "")).lower():
+                if (pg + 1) not in heading_pages:
+                    heading_pages.append(pg + 1)
+            elif tl in _norm_caption(it).lower():
+                if (pg + 1) not in body_pages:
+                    body_pages.append(pg + 1)
+    if not heading_pages and not body_pages:
         for i, t in enumerate(m.per_page_text):
             if tl in t.lower():
-                pages.append(i + 1)
-    if not pages:
+                body_pages.append(i + 1)
+    if heading_pages:
+        pages, conf = sorted(heading_pages)[:2], 0.9          # 命中标题:定位最可靠
+    elif body_pages:
+        pages = sorted(body_pages)[:4]
+        conf = round(1.0 / len(pages), 2)                     # 实例级置信:命中页越少越确定
+    else:
         return None
-    pages = sorted(pages)[:4]
     # 修复(16题诊断):"physical page N" 重写框架反把对的搞错。默认报朴素页号;DG_PAGEMAP_REFRAME=true 才给双框架。
     if _dg_env("DG_PAGEMAP_REFRAME", False):
         framed = "; ".join(m.page_map.phys_frame(p) for p in pages)
@@ -533,7 +546,7 @@ def r_locate(m: DocModel, q: str) -> Fact | None:
     else:
         framed = ", ".join(f"page {p}" for p in pages)
         note = f'[Programmatic locator: "{target}" appears on {framed}.]'
-    return Fact("locate", pages, 0.7, note, "content_list/pdf")
+    return Fact("locate", pages, conf, note, "content_list/pdf")
 
 
 def r_extract_page(m: DocModel, q: str) -> Fact | None:
@@ -586,15 +599,28 @@ def r_meta_stats(m: DocModel, q: str) -> Fact | None:
 _RESOLVERS = [r_mention, r_abbrev_words, r_locate, r_extract_page, r_title, r_elements,
               r_references, r_sections, r_pages_total, r_words, r_footnotes]
 
-# 各 kind 的注入置信阈值(噪声大的设高 -> 倾向弃权,保护已答对的题)
+# ===========================================================================
+# L3 置信度模型(确定性可验证门控 deterministic, verifiability-gated injection)
+# ---------------------------------------------------------------------------
+# 每个 Fact 的 confidence 尽量是【实例级、可由输入确定性算出的自检信号】,而非死常数:
+#   pages    : 精确可数         -> 0.95(恒,真确定)
+#   PageMap  : 页脚一致率        -> #{页脚号==物理序号−k} / #有编号页
+#   abbrev   : 头名领先度        -> 1 − f2/f1(并列则低→弃权,治"缩写选错")
+#   locate   : 命中唯一性/标题   -> 命中标题=0.9;否则 1/命中页数(越少越确定)
+#   elements : 合理度           -> min(1, 页数/计数)(被切碎则骤降→弃权)
+#   词数/脚注/章节/参考文献      : 金标口径不可观测、无可靠实例信号 -> 维持弃权(诚实边界)
+# 注入门:inject(f) ⇔ conf(f) ≥ τ_kind。阈值是开发集"校准"出来的常数(数触发准确率,
+# 非梯度训练)→ 全程 training-free,审稿人问"置信度怎么来"有可复现的公式可答。
+# ===========================================================================
 _THRESHOLD = {
-    "mention": 0.6, "locate": 0.6, "extract_page": 0.6, "title": 0.6,
-    "abbrev": 0.6, "topwords": 0.6,
-    "elements": 0.6, "elements_sum": 0.6, "references": 0.99, "sections": 0.99,
-    "pages": 0.6, "words": 0.99, "words_page": 0.99, "footnotes": 0.99, "meta_stats": 0.99,
+    "mention": 0.6, "extract_page": 0.6, "title": 0.6, "topwords": 0.6, "pages": 0.6,
+    "abbrev": 0.5,        # 头名领先度≥0.5 = 第一名≥2×第二名才注入
+    "locate": 0.4,        # 命中标题(0.9)或 ≤2 页(0.5)才注入,3+ 页歧义则弃权
+    "elements": 0.8, "elements_sum": 0.8,   # 真实图表数 ≤ ~页数;计数>1.25×页数=被切碎→弃权
+    "references": 0.99, "sections": 0.99,    # 口径不可观测 -> 默认弃权
+    "words": 0.99, "words_page": 0.99, "footnotes": 0.99, "meta_stats": 0.99,
 }
-# 说明:references/sections/words/footnotes 默认阈值 0.99(>其产出置信)= 实际弃权;
-#       经子集 A/B 证明某类真赢后,再单独调低其阈值开启(可消融、零回归)。
+# 默认阈值 0.99 的几类 = 实际弃权(诚实负向);经子集校准证明某类真赢后再单独调低开启。
 
 
 def ground(question: str, pdf_path: str, content_list_path: str = None,
