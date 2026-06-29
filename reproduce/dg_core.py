@@ -1,25 +1,28 @@
-"""dg_core —— DG-RAG 统一确定性接地框架(收编散落的 doc_meta/doc_locate/... 补丁式算子)。
+"""dg_core —— DG-RAG:免训练、零额外 LLM 调用的确定性接地层(单文档、绕过检索、读原文)。
 
-三层(详见素材库 2026-06-28 错题诊断):
-  Layer 1 DocumentModel : 每篇建一次的单一真相源——PageMap(物理↔印刷页)/ 逐页文本 /
-                          canonical 全文 / content_list typed elements。所有算子共用,杜绝口径不一。
-  Layer 2 算子代数       : 4 个【参数化组合子】COUNT / LOCATE / EXTRACT / LOOKUP(不再是 N 个手写函数)。
-                          每个题型 = 给组合子传参数(unit/scope/target/field),不是新增一个函数。
-                          11 条意图正则只是【确定性语义解析器】:把自然语言映射到上面的算子调用(零 LLM)。
-  Layer 3 门控+弃权      : 每个组合子返回 Fact(value, confidence, note);confidence 是【实例级、由输入
-                          确定性算出的自检信号】(非死常数);conf<阈值则弃权(不注入)→ 回退基座=非回归。
+形式化(论文口径):对一道问题,我们做三步,
+    parse  : 问题 q ──▶ 类型化查询 Q       (确定性语义解析器;零 LLM)
+    eval   : ⟦Q⟧(D) ──▶ Fact(value, s)     (在文档模型 D 上解释执行;s = 可验证自检分)
+    gate   : 当 s ≥ τ 才注入,否则弃权回退基座(确定性可验证门控;期望非回归)
 
-与 GlobalRAG 的区分:GlobalRAG 是【语料级】符号算子(跨文档实体计数/极值/排序);本框架是【单文档】、
-绕过检索直接读原文、并带【确定性可验证门控】(算子仅在自检判定可靠时才开口),training-free、可跨基座迁移。
+查询语言只有 4 个组合子(算子代数 O),与具体题型无关——题型只是给组合子传不同参数:
+    Q ::= Count(unit, scope)        计数:unit ∈ {Page, Word, Element(t), Heading(k), Ref, Span(x)}
+        | Locate(target)            定位:把 target 定位到真正讨论它的页
+        | Extract(ref)              取页:把页引用(字面/相对/印刷)投到物理页取文本
+        | Lookup(field)             查域:从结构化区读单值(title/authors/date/abbrev/...)
 
-为什么这样比旧版高(诊断驱动,非逐题打补丁):
-  - 页码相关错占 A/C 的 55%(37/67),根因是"物理页 vs 印刷页"框架错位 + locate 只索引标题。
-    PageMap 一处建模、LOCATE/EXTRACT 全程用它出"印刷 N(物理 M)"双框架 —— 金标正是这双框架。
-  - 计数错(mention/word/element)源于文本源不一致、目标未归一化 —— 统一 DocumentModel + 归一化治。
-  - 噪声大、口径不可观测的(footnote/section)—— 用实例级自检弃权,把"算错值"变安全 no-op。
+三层落地:
+  L1 DocumentModel(build_doc_model):每篇建一次的单一真相源——PageMap(物理↔印刷)/逐页文本/
+     canonical 全文 / content_list typed elements。所有算子共用,杜绝口径不一。
+  L2 算子代数(COUNT/LOCATE/EXTRACT/LOOKUP)+ 解析文法(_GRAMMAR)+ 解释器(evaluate)。
+  L3 门控(ground 内 gate):每个 Fact 的 confidence 是【实例级、由输入确定性算出的自检】(非死常数);
+     conf < τ_kind 则弃权。决策论扩展点:给 DG_CALIB_FILE 则 τ_eff = max(τ, pbase+margin)
+     ("仅当算子估计答对率 > 基座才注入")。阈值由开发集校准(数频率),非梯度训练 → training-free。
 
-零回归:本模块独立;query.py 经 ENABLE_DG_CORE 开关接入,默认关 = 走旧路由。
-消融/回退开关:DG_LEGACY=true 完全复现旧(64%)行为(常数置信度 + first-over-threshold),供 A/B。
+与 GlobalRAG 区分:GlobalRAG 是【语料级】符号算子(跨文档实体计数/极值/排序);本框架是【单文档】、
+绕检索读原文、且带【确定性可验证门控】(算子仅在自检判定可靠时开口),training-free、跨基座可迁移。
+
+零回归:query.py 经 ENABLE_DG_CORE 接入,默认关。DG_LEGACY=true 精确复现旧(64%)行为做 A/B。
 """
 from __future__ import annotations
 
@@ -240,7 +243,7 @@ def build_doc_model(pdf_path: str, content_list_path: str = None) -> DocModel | 
 
 
 # =====================================================================================
-# Layer 3 数据结构 —— Fact
+# Fact —— eval 的产物:一个值 + 一个可验证自检分 + 注入文本
 # =====================================================================================
 
 @dataclass
@@ -254,16 +257,10 @@ class Fact:
 
 # =====================================================================================
 # Layer 2 —— 算子代数:4 个参数化组合子(COUNT / LOCATE / EXTRACT / LOOKUP)
-# -------------------------------------------------------------------------------------
-# 设计:把旧版 N 个手写函数收编为 4 个组合子。每个组合子接受【参数】(unit / scope / target / field),
-# 输出 (value, confidence)。confidence = 该输出的【实例级确定性自检】,而非写死的常数。
-#   COUNT(unit, scope) : unit ∈ {PAGE, WORD, ELEMENT(types), HEADING(kind), REF, SPAN(variants)}
-#   LOCATE(target)     : 定位目标到讨论页
-#   EXTRACT(page_ref)  : 取某物理页文本
-#   LOOKUP(field)      : 从结构化区读单值字段(title;date/venue/author 为扩展点)
+# 每个组合子接受参数,输出 (value, confidence);confidence = 实例级确定性自检,而非死常数。
 # =====================================================================================
 
-# ---- unit / scope 构造子(算子的参数,可组合)----
+# ---- unit / scope 构造子(COUNT 的参数,可组合)----
 def U_PAGE():               return ("page", ())
 def U_WORD():               return ("word", ())
 def U_ELEMENT(types):       return ("element", tuple(types))
@@ -299,28 +296,22 @@ def _span_text(m: DocModel) -> str:
 
 
 def COUNT(m: DocModel, unit, scope=S_WHOLE):
-    """⭐ 参数化计数器:一个组合子覆盖 页/词/元素/标题/参考文献/正则跨度。
-    返回 (value, confidence, evidence)。confidence = 该 unit 的【实例级确定性自检】。
-    value=None 表示该 unit 在本文档不可数(交由调用方弃权)。"""
+    """参数化计数器:一个组合子覆盖 页/词/元素/标题/参考文献/正则跨度。返回 (value, confidence, evidence)。
+    confidence = 该 unit 的实例级确定性自检;value=None 表示该 unit 在本文档不可数。"""
     kind, params = unit
     skind, szone = scope
-
     if kind == "page":
-        # 精确可数(物理页) -> 自检恒高(真确定)。
-        return m.page_count, 0.95, {}
-
+        return m.page_count, 0.95, {}                      # 精确可数 -> 自检恒高
     if kind == "word":
         v = len(m.full_text.split())
         alt = _pypdf_wordcount(m.pdf_path)
-        # 自检 = 跨源一致率:两个独立抽取器吻合 -> 高;发散(扫描/多栏)-> 低 -> 弃权。
-        # ⚠️ 与数据集无关(不写死"词数=PyMuPDF");无第二源时退回 0.8(=可注入)。
+        # 自检 = 跨源一致率(PyMuPDF vs pypdf):吻合->高;发散->低->弃权。数据集无关。
         if alt is None or v == 0:
             conf, agree = 0.8, None
         else:
             agree = 1.0 - min(1.0, abs(v - alt) / max(v, alt))
             conf = round(agree, 2)
         return v, conf, {"alt": alt, "agree": agree}
-
     if kind == "element":
         c = 0
         for it in m.elements:
@@ -328,10 +319,8 @@ def COUNT(m: DocModel, unit, scope=S_WHOLE):
                 if skind == "excluding" and szone is not None and (it.get("page_idx") or 0) >= szone:
                     continue
                 c += 1
-        # 自检 = 合理度 min(1, 页数/计数):论文图表数 << 页数 -> 高;计数 ≫ 页数(被切碎)-> 低 -> 弃权。
-        conf = round(min(1.0, m.page_count / c), 2) if c else 0.0
+        conf = round(min(1.0, m.page_count / c), 2) if c else 0.0   # 合理度:被切碎则骤降->弃权
         return c, conf, {}
-
     if kind == "heading":
         hk = params[0]
         if hk == "subsection":
@@ -341,9 +330,7 @@ def COUNT(m: DocModel, unit, scope=S_WHOLE):
             c = sum(1 for it in m.elements if it.get("text_level")
                     and re.match(r"^\s*(\d+\s+\S|chapter\s+\d+|part\s+[ivxl0-9]+)",
                                  str(it.get("text", "")), re.I))
-        # 章节粒度口径不可观测,自检无可靠信号 -> 低置信(默认弃权)。
-        return c, 0.4, {}
-
+        return c, 0.4, {}                                  # 章节粒度口径不可观测 -> 低置信
     if kind == "ref":
         start = None
         for idx, it in enumerate(m.elements):
@@ -355,30 +342,27 @@ def COUNT(m: DocModel, unit, scope=S_WHOLE):
             return None, 0.0, {}
         c = 0
         for it in m.elements[start + 1:]:
-            if it.get("text_level"):  # 到下一个标题(附录等)停
+            if it.get("text_level"):
                 break
             t = str(it.get("text", "")).strip()
             if it.get("type") == "list":
                 c += max(1, t.count("\n") + 1)
-            elif re.match(r"^\[?\d+\]?\.?\s|\b\(\d{4}\)\b|\b\d{4}\.", t):  # 编号或带年份
+            elif re.match(r"^\[?\d+\]?\.?\s|\b\(\d{4}\)\b|\b\d{4}\.", t):
                 c += 1
         if c < 3:
-            return None, 0.0, {}     # 没数出像样的参考表 -> 弃权
+            return None, 0.0, {}
         return c, 0.45, {}
-
     if kind == "span":
         counts = [_flex_count(_span_text(m), v) for v in params]
         best = max(counts, default=0)
-        return best, None, {"counts": counts}   # conf 交调用方(需 target 长度判假阳性)
-
+        return best, None, {"counts": counts}              # conf 交调用方(需 target 长度判假阳性)
     return None, 0.0, {}
 
 
 def LOCATE(m: DocModel, target: str):
-    """⭐ 定位组合子:把 target 定位到【真正讨论它的页】(排除目录"提一嘴")。
-    自检 = 命中章节标题(0.9)/ 否则出现最密集页的占比(越集中越确定)。"""
+    """定位组合子:把 target 定位到【真正讨论它的页】(排除目录"提一嘴")。
+    自检 = 命中章节标题(0.9)/ 否则出现最密集页的占比。"""
     tl = target.lower()
-    # 排除目录页:目标常在目录里"提一嘴",不是真正讨论页(治 locate 找错页)。
     toc = set()
     for it in m.elements:
         if it.get("text_level") and re.search(r"table of contents|^\s*contents\s*$",
@@ -386,7 +370,6 @@ def LOCATE(m: DocModel, target: str):
             pg = it.get("page_idx")
             if isinstance(pg, int):
                 toc.add(pg + 1)
-    # 1) 命中【章节标题】= 最可靠(排除目录里的条目)
     heading_pages = []
     for it in m.elements:
         pg = it.get("page_idx")
@@ -396,7 +379,6 @@ def LOCATE(m: DocModel, target: str):
     if heading_pages:
         pages, conf = sorted(heading_pages)[:2], 0.9
     else:
-        # 2) 按【每页出现次数】选最密集页(排除目录)。引言里只"提一嘴"次数少→自然落选。
         hits = {}
         for i, t in enumerate(m.per_page_text):
             if (i + 1) in toc:
@@ -405,13 +387,11 @@ def LOCATE(m: DocModel, target: str):
             if c > 0:
                 hits[i + 1] = c
         if not hits:
-            return None   # 只在目录/根本没出现 → 弃权(治"硬编不存在的附录"假阳性)
+            return None
         total = sum(hits.values())
         top = max(hits.values())
         pages = sorted([p for p, c in hits.items() if c == top])[:2]
         conf = round(top / total, 2)
-    # 页框架(校准:locate 44% 多因框架不匹配,金标常"印刷 or 物理"两收)。
-    # 仅当 PageMap 高置信(双源可靠)时给双框架对齐金标;不可信时报朴素页号。
     if m.page_map.confident or _dg_env("DG_PAGEMAP_REFRAME", False):
         framed = "; ".join(m.page_map.phys_frame(p) for p in pages)
         note = (f'[Programmatic locator: "{target}" appears on {framed}. '
@@ -423,7 +403,7 @@ def LOCATE(m: DocModel, target: str):
 
 
 def EXTRACT(m: DocModel, phys: int, label: str, clean: bool):
-    """⭐ 取页组合子:返回某物理页文本。自检 = 页引用是否被唯一/可靠解析(clean)+ 文本非空。"""
+    """取页组合子:返回某物理页文本。自检 = 页引用是否被唯一/可靠解析(clean)+ 文本非空。"""
     snip = m.page_text(phys)
     if not snip:
         return None
@@ -433,22 +413,23 @@ def EXTRACT(m: DocModel, phys: int, label: str, clean: bool):
 
 
 def LOOKUP(m: DocModel, fieldname: str):
-    """⭐ 查字段组合子:从结构化区读单值。当前 field=title;date/venue/author 为后续 Field 扩展点。"""
+    """查域组合子:从结构化区读单值。field ∈ {title, authors, last_author, date, abbrev, topwords}。"""
     if fieldname == "title":
+        if not m.has_elements:
+            return None
         h1 = [it for it in m.elements if it.get("text_level") == 1 and str(it.get("text", "")).strip()]
         if not h1:
             return None
         title = " ".join(str(h1[0]["text"]).split())
-        # 自检 = 标题唯一性:全文唯一 H1 -> 高;有多个竞争 H1 -> 略低(仍可注入,取首个)。
-        conf = 0.9 if len(h1) == 1 else 0.65
+        conf = 0.9 if len(h1) == 1 else 0.65          # 自检 = H1 唯一性
         return Fact("title", title, conf,
                     f'[Programmatically extracted document title: "{title}".]', "content_list")
     if fieldname in ("authors", "last_author"):
-        names = _author_names(_author_block(m))
+        block = _author_block(m)
+        names = _author_names(block)
         if not names:
             return None
-        # 自检 = 作者区是否"干净"(每行一个姓名、无 ' and '/逗号合并):干净则高置信,否则低置信→弃权。
-        clean = not any(re.search(r"\s+and\s+|,", t) for t in _author_block(m))
+        clean = not any(re.search(r"\s+and\s+|,", t) for t in block)   # 自检 = 作者区是否干净
         conf = 0.8 if clean else 0.45
         if fieldname == "last_author":
             return Fact("last_author", names[-1], conf,
@@ -457,12 +438,114 @@ def LOOKUP(m: DocModel, fieldname: str):
         return Fact("authors", len(names), conf,
                     f"[Programmatically extracted from the front matter: the paper lists {len(names)} "
                     f"authors ({', '.join(names[:8])}).]", "content_list")
+    if fieldname == "date":
+        head = " ".join(m.per_page_text[:2]) if m.per_page_text else ""
+        uniq = sorted({d.title() for d in _RE_COVER_DATE.findall(head)})
+        if len(uniq) != 1:                            # 自检 = 封面唯一 Month YYYY;否则弃权
+            return None
+        return Fact("date", uniq[0], 0.7,
+                    f"[Programmatically extracted from the cover/front matter: the document date is "
+                    f"{uniq[0]}.]", "pdf")
+    if fieldname in ("abbrev", "topwords"):
+        if text_stats is None:
+            return None
+        try:
+            s = text_stats(m.full_text)
+        except Exception:
+            return None
+        if fieldname == "abbrev":
+            abv = s.get("top_abbrevs") or []
+            if not abv:
+                return None
+            ab, cnt = abv[0]
+            f2 = abv[1][1] if len(abv) > 1 else 0
+            conf = round(1.0 - (f2 / cnt), 2) if cnt else 0.0   # 自检 = 头名领先度 1−f2/f1
+            return Fact("abbrev", ab, conf,
+                        f'[Programmatically computed: the most frequent abbreviation/acronym is "{ab}" '
+                        f"({cnt} occurrences).]", "pdf")
+        tw = s.get("top_words") or []
+        if not tw:
+            return None
+        top3 = ", ".join(tw[:3])
+        return Fact("topwords", top3, 0.7,
+                    f"[Programmatically computed: the top-3 most frequent words are {top3}.]", "pdf")
     return None
 
 
+# ---- front_matter 结构化解析(覆盖前页事实:作者/日期)。论文通用结构,与数据集无关。----
+_AFFIL_PREFIX = "*∗†‡§¶"
+
+
+def _author_block(m: DocModel):
+    """页0:level-1 标题之后、首个 level-2 标题(Abstract/Introduction)之前的 text 行 = 作者区。
+    去掉邮箱行/隶属(标记或数字开头)行/过长句子行。返回候选作者文本行。"""
+    if not m.elements:
+        return []
+    started, lines = False, []
+    for it in m.elements:
+        if (it.get("page_idx") or 0) > 0:
+            break
+        lv = it.get("text_level")
+        t = " ".join(str(it.get("text", "")).split())
+        if not started:
+            if lv == 1 and t:
+                started = True
+            continue
+        if lv and lv >= 2:
+            break
+        if it.get("type") != "text" or not t:
+            continue
+        if "@" in t or t[0] in _AFFIL_PREFIX or t[0].isdigit():
+            continue
+        if len(t.split()) > 12:
+            continue
+        lines.append(t)
+    return lines
+
+
+def _author_names(lines):
+    """从作者区行抽姓名:行内可能 'A and B and C' 或 'A, B, and C'。姓名 = 2-4 个首字母大写词。"""
+    names = []
+    for t in lines:
+        for p in re.split(r"\s+and\s+|,\s*", t):
+            p = p.strip().strip(_AFFIL_PREFIX + " ")
+            toks = p.split()
+            if 2 <= len(toks) <= 4 and sum(1 for w in toks if w[:1].isupper()) >= 2:
+                names.append(p)
+    return names
+
+
+_MONTHS = ("January|February|March|April|May|June|July|August|September|October|November|December")
+_RE_COVER_DATE = re.compile(r"\b((?:" + _MONTHS + r")\s+\d{4})\b", re.I)
+
+
 # =====================================================================================
-# 确定性语义解析器:把自然语言映射到上面的算子调用(11 条意图正则,零 LLM)。
+# 解析文法:问题 q ──▶ 类型化查询 Q(零 LLM,确定性)。
+# Q 的种类:Count / Locate / Extract / Lookup —— 对应 4 个组合子。
 # =====================================================================================
+
+@dataclass(frozen=True)
+class Count:
+    unit: tuple                 # ("page",) ("word",) ("element",..) ("ref",) ("heading",k) ("span",target)
+    scope: tuple = S_WHOLE      # 或 ("page_printed", N) 表示"印刷第 N 页上的词数"
+
+
+@dataclass(frozen=True)
+class Locate:
+    target: str
+
+
+@dataclass(frozen=True)
+class Extract:
+    ref: tuple                  # ("first_sent",N)|("printed",N)|("last",)|("second_last",)|("front",)
+
+
+@dataclass(frozen=True)
+class Lookup:
+    field: str                  # title|authors|last_author|date|abbrev|topwords
+
+
+# ---- 意图正则(确定性语义解析器的词法)----
 _RE_MENTION = re.compile(r"how many time", re.I)
 _RE_WORDS = re.compile(r"how many words|number of words|word count|words (?:are|does|in|in total)", re.I)
 _RE_PAGES_TOTAL = re.compile(r"how many pages", re.I)
@@ -470,13 +553,10 @@ _RE_ELEM = re.compile(r"how many\s+(figures?|images?|tables?|equations?|charts?|
 _RE_REFS = re.compile(r"how many\s+(references?|citations?|cited)", re.I)
 _RE_SECTIONS = re.compile(r"how many\s+(sections?|chapters?|parts?|subsections?)", re.I)
 _RE_FOOTNOTES = re.compile(r"how many\s+footnotes?", re.I)
-_RE_AUTHORS = re.compile(r"how many\s+(authors?|institutions?|affiliations?)", re.I)
-# 定位:"X 在第几页"
 _RE_LOCATE = re.compile(
     r"\b(on|at|from)\s+(which|what)\s+page\b"
     r"|\bwhich\s+page\b[^?]*\b(is|are|does|do|located|show|present|discuss|list|introduce|begin|start)\b"
     r"|\bwhat\s+page\b", re.I)
-# 页内容:"第 N 页讲什么 / 末页 / 首页"
 _RE_PAGE_REF = re.compile(r"\bpage\s+(\d{1,4})\b", re.I)
 _RE_FIRST_SENT = re.compile(r"first sentence on page\s+(\d{1,4})", re.I)
 _RE_REL_LAST = re.compile(r"\b(last|final)\s+page\b", re.I)
@@ -485,10 +565,8 @@ _RE_REL_FRONT = re.compile(r"\b(front\s*page|first\s+page|cover\s+page|frontpage
 _RE_PAGE_CONTENT = re.compile(
     r"(what|topic|content|focus|message|summary|purpose|talk about|conveyed|present)", re.I)
 _RE_TITLE = re.compile(r"\b(document|paper|report|newspaper)\s+title\b|\btitle of the\b", re.I)
-# 缩写 / 最高频词(16题诊断:dgcore 原先没这两类 resolver→弃权→答错 4+1 题)
 _RE_ABBR = re.compile(r"\b(?:most\s+(?:common|frequent)\s+)?(?:abbreviation|acronym)s?\b", re.I)
 _RE_TOPWORDS = re.compile(r"\b(?:top\s*\d*\s*)?most\s+(?:common|frequent)\s+words?\b", re.I)
-# 覆盖(前页事实):作者数 / 末位作者 / 发布日期
 _RE_AUTHORS_CNT = re.compile(r"how many\s+authors?\b", re.I)
 _RE_LAST_AUTHOR = re.compile(r"\b(?:last|final)\s+author\b", re.I)
 _RE_DATE_Q = re.compile(
@@ -515,7 +593,7 @@ def _normalize_mention_variants(target: str):
     """归一化:去括号注释、生成大小写/复数/同义变体,治 'VAT(value-added tax)'、'total revenue(s)'。"""
     base = re.sub(r"\s*\([^)]*\)\s*", " ", target).strip() or target
     variants = {base}
-    inner = re.findall(r"\(([^)]+)\)", target)  # 括号里的也算(如缩写)
+    inner = re.findall(r"\(([^)]+)\)", target)
     variants.update(x.strip() for x in inner if x.strip())
     return [v for v in variants if v]
 
@@ -526,7 +604,6 @@ _STRUCT_WORDS = ("table of contents", "related work", "future work", "appendix",
 
 
 def _locate_target(q: str):
-    # 名词在定位动词之前:"...does the appendix (of ...) start/begin/appear"
     m = re.search(r"\bdoes\s+the\s+(.+?)\s+(?:begin|start|appear|locate|present)", q, re.I)
     if m:
         t = re.sub(r"\bof\s+(this|the)\s+document\b.*$", "", m.group(1), flags=re.I).strip(" '\"")
@@ -545,7 +622,6 @@ def _locate_target(q: str):
             if 2 <= len(t) <= 60 and len(t.split()) <= 8 and not re.match(
                     r"^(it|them|this|that|these|those|the\s+(document|report|paper))\b", t, re.I):
                 return t
-    # 结构性关键词兜底
     ql = q.lower()
     for w in _STRUCT_WORDS:
         if w in ql:
@@ -561,247 +637,237 @@ def _appendix_page(m: DocModel):
     return None
 
 
-# ---- front_matter 结构化解析(覆盖前页事实:作者/日期)。论文通用结构,与具体数据集无关。----
-_AFFIL_PREFIX = "*∗†‡§¶"   # ∗ † ‡ § ¶
-
-
-def _author_block(m: DocModel):
-    """页0:level-1 标题之后、首个 level-2 标题(Abstract/Introduction)之前的 text 行 = 作者区。
-    去掉邮箱行/隶属(标记或数字开头)行/过长句子行。返回候选作者文本行。"""
-    if not m.elements:
-        return []
-    started, lines = False, []
-    for it in m.elements:
-        if (it.get("page_idx") or 0) > 0:
-            break
-        lv = it.get("text_level")
-        t = " ".join(str(it.get("text", "")).split())
-        if not started:
-            if lv == 1 and t:
-                started = True
-            continue
-        if lv and lv >= 2:          # 到 Abstract/Introduction 等小节标题 -> 作者区结束
-            break
-        if it.get("type") != "text" or not t:
-            continue
-        if "@" in t or t[0] in _AFFIL_PREFIX or t[0].isdigit():
-            continue                # 邮箱/隶属/脚注行,不是姓名
-        if len(t.split()) > 12:     # 太长 = 摘要/正文渗入,不是作者行
-            continue
-        lines.append(t)
-    return lines
-
-
-def _author_names(lines):
-    """从作者区行抽姓名:行内可能 'A and B and C' 或 'A, B, and C'。姓名 = 2-4 个首字母大写词。"""
-    names = []
-    for t in lines:
-        for p in re.split(r"\s+and\s+|,\s*", t):
-            p = p.strip().strip(_AFFIL_PREFIX + " ")
-            toks = p.split()
-            if 2 <= len(toks) <= 4 and sum(1 for w in toks if w[:1].isupper()) >= 2:
-                names.append(p)
-    return names
-
-
-_MONTHS = ("January|February|March|April|May|June|July|August|September|October|November|December")
-_RE_COVER_DATE = re.compile(r"\b((?:" + _MONTHS + r")\s+\d{4})\b", re.I)
-
-
-# =====================================================================================
-# resolvers —— 薄封装:解析意图 -> 调组合子 -> 包成 Fact(自检置信度由组合子给出)。
-# =====================================================================================
-
-def r_mention(m: DocModel, q: str) -> Fact | None:
+# ---- 文法规则:每条 = 一个 builder(question) -> Query | None。优先级 = 列表顺序(具体->泛化)。----
+def _g_mention(q):
     if not _RE_MENTION.search(q):
         return None
-    target = _mention_target(q)
-    if not target:
+    t = _mention_target(q)
+    return Count(("span", t)) if t else None
+
+
+def _g_authors(q):
+    if _dg_env("DG_LEGACY", False) or not _dg_env("DG_COVERAGE", True):
         return None
-    variants = _normalize_mention_variants(target)
-    best, _, ev = COUNT(m, U_SPAN(variants))
-    if best == 0:
-        return None  # 没数到 -> 弃权(可能目标抽错/拼写差异),不报 0
-    # 实例级自检:命中集中度 + 短目标(易假阳性)惩罚。
-    counts = ev.get("counts") or [best]
-    tot = sum(counts) or best
-    agree = max(counts) / tot if tot else 1.0
-    conf = round(0.85 * agree, 2)
-    if len(target.replace(" ", "")) <= 2:
-        conf = min(conf, 0.5)
-    return Fact("mention", best, conf,
-                f'[Programmatically verified: the phrase "{target}" appears {best} times '
-                f"in the document (including tables).]", "full_text+tables")
-
-
-def r_pages_total(m: DocModel, q: str) -> Fact | None:
-    if not _RE_PAGES_TOTAL.search(q):
-        return None
-    if re.search(r"excluding|without|except", q, re.I):
-        return None  # "排除参考文献的页数" 口径复杂 -> 弃权
-    v, conf, _ = COUNT(m, U_PAGE())
-    return Fact("pages", v, conf,
-                f"[Programmatically verified: the document has {v} physical pages.]", "pdf")
-
-
-def r_words(m: DocModel, q: str) -> Fact | None:
-    if not _RE_WORDS.search(q):
-        return None
-    pr = _RE_PAGE_REF.search(q)
-    if pr:  # "page N 上多少词"
-        phys = m.page_map.to_physical(int(pr.group(1)))
-        if not phys:
-            return None
-        wc = len(m.page_text(phys, max_chars=10**9).split())
-        return Fact("words_page", wc, 0.45,
-                    f"[Approximate word count on {m.page_map.frame(int(pr.group(1)))} "
-                    f"(from extracted text) = {wc}.]", "pdf")
-    # 自检 = 两个独立抽取器(PyMuPDF vs pypdf)的词数一致率(见 COUNT word)。
-    # 取代旧版"词数=PyMuPDF→恒注入"(有 DocBench 过拟合嫌疑):换成数据集无关的稳定性信号。
-    wc, conf, _ = COUNT(m, U_WORD())
-    return Fact("words", wc, conf,
-                f"[Programmatically counted: the document contains {wc} words "
-                f"(whitespace-delimited tokens over the extracted text).]", "pdf")
-
-
-def r_elements(m: DocModel, q: str) -> Fact | None:
-    mm = _RE_ELEM.search(q)
-    if not mm:
-        return None
-    if not m.has_elements:
-        return None  # 需 content_list -> 无则弃权
-    kind = mm.group(1).lower()
-    type_map = {"figure": ("image", "chart"), "figures": ("image", "chart"),
-                "image": ("image",), "images": ("image",),
-                "table": ("table",), "tables": ("table",),
-                "equation": ("equation",), "equations": ("equation",),
-                "chart": ("chart",), "charts": ("chart",),
-                "illustration": ("image",), "illustrations": ("image",)}
-    # 方法学边界(诚实写进论文):MinerU 对长多栏报告会把图切成碎片(doc114:184页/230碎片/gold31),
-    # 元素解析仅在论文体量文档可信 → 长文档对"图/表计数"一律弃权(文档类作用域,非按题特调)。
-    if m.page_count > 30:
-        return None
-    types = type_map.get(kind, ("image",))
-    ap = _appendix_page(m) if re.search(r"excluding|without|except", q, re.I) else None
-    scope = S_EXCLUDING(ap) if ap is not None else S_WHOLE
-
-    if re.search(r"tables?\s+and\s+(figures?|images?)|figures?\s+and\s+tables?", q, re.I):
-        figs, _, _ = COUNT(m, U_ELEMENT(("image", "chart")), scope)
-        tbls, _, _ = COUNT(m, U_ELEMENT(("table",)), scope)
-        total = figs + tbls
-        if total < 1:
-            return None
-        conf = round(min(1.0, m.page_count / total), 2) if total else 0.0
-        return Fact("elements_sum", total, conf,
-                    f"[Programmatically counted from the parsed document: {figs} figures + "
-                    f"{tbls} tables = {total} in total.]", "content_list")
-    cnt, conf, _ = COUNT(m, U_ELEMENT(types), scope)
-    if cnt < 1:
-        return None
-    return Fact("elements", cnt, conf,
-                f"[Programmatically counted from the parsed document: {cnt} {kind}.]", "content_list")
-
-
-def r_references(m: DocModel, q: str) -> Fact | None:
-    if not _RE_REFS.search(q) or not m.has_elements:
-        return None
-    cnt, conf, _ = COUNT(m, U_REF())
-    if cnt is None:
-        return None
-    return Fact("references", cnt, conf,
-                f"[Approximate reference count from the parsed bibliography ≈ {cnt}.]", "content_list")
-
-
-def r_sections(m: DocModel, q: str) -> Fact | None:
-    mm = _RE_SECTIONS.search(q)
-    if not mm or not m.has_elements:
-        return None
-    unit = mm.group(1).lower()
-    hk = "subsection" if unit.startswith("subsection") else "section"
-    cnt, conf, _ = COUNT(m, U_HEADING(hk))
-    if cnt < 1:
-        return None
-    return Fact("sections", cnt, conf,
-                f"[Approximate count of top-level {unit} from parsed headings ≈ {cnt}; "
-                f"section granularity may differ from the reference.]", "content_list")
-
-
-def r_footnotes(m: DocModel, q: str) -> Fact | None:
-    # 脚注口径噪声大(实测 page_footnote 数≠金标)-> 默认弃权,避免注入错值
+    if _RE_LAST_AUTHOR.search(q):
+        return Lookup("last_author")
+    if _RE_AUTHORS_CNT.search(q):
+        return Lookup("authors")
     return None
 
 
-def r_title(m: DocModel, q: str) -> Fact | None:
-    if not _RE_TITLE.search(q) or not m.has_elements:
+def _g_date(q):
+    if _dg_env("DG_LEGACY", False) or not _dg_env("DG_COVERAGE", True):
         return None
-    return LOOKUP(m, "title")
+    return Lookup("date") if _RE_DATE_Q.search(q) else None
 
 
-def r_abbrev_words(m: DocModel, q: str) -> Fact | None:
-    """缩写 / 最高频词:收编旧 DSG 的有效逻辑(text_stats)。dgcore 原先漏了这两类→弃权→答错。"""
+def _g_abbrev(q):
     if text_stats is None or not _dg_env("DG_META_STATS", True):
         return None
     is_abbr = bool(_RE_ABBR.search(q))
     is_tw = bool(_RE_TOPWORDS.search(q)) and not is_abbr
-    if not (is_abbr or is_tw):
-        return None
-    try:
-        s = text_stats(m.full_text)
-    except Exception:
-        return None
     if is_abbr:
-        abv = s.get("top_abbrevs") or []
-        if not abv:
-            return None
-        ab, cnt = abv[0]
-        # 实例级置信 = 头名领先度:第一名比第二名领先越多越确定;并列(易选错)→低置信→弃权。
-        f2 = abv[1][1] if len(abv) > 1 else 0
-        conf = round(1.0 - (f2 / cnt), 2) if cnt else 0.0
-        return Fact("abbrev", ab, conf,
-                    f'[Programmatically computed: the most frequent abbreviation/acronym is "{ab}" '
-                    f"({cnt} occurrences).]", "pdf")
-    tw = s.get("top_words") or []
-    if not tw:
-        return None
-    top3 = ", ".join(tw[:3])
-    return Fact("topwords", top3, 0.7,
-                f"[Programmatically computed: the top-3 most frequent words are {top3}.]", "pdf")
+        return Lookup("abbrev")
+    if is_tw:
+        return Lookup("topwords")
+    return None
 
 
-def r_locate(m: DocModel, q: str) -> Fact | None:
+def _g_locate(q):
     if not _RE_LOCATE.search(q):
         return None
-    target = _locate_target(q)
-    if not target:
-        return None
-    return LOCATE(m, target)
+    t = _locate_target(q)
+    return Locate(t) if t else None
 
 
-def r_extract_page(m: DocModel, q: str) -> Fact | None:
-    # 解析题面指向的物理页(具体页号 / 相对页),注入该页文本
+def _g_extract(q):
     if re.search(r"how many", q, re.I):
-        return None  # "某页有几个X" 是计数题,不是取页内容 -> 交给计数 resolver
+        return None
+    fs = _RE_FIRST_SENT.search(q)
+    if fs:
+        return Extract(("first_sent", int(fs.group(1))))
+    if _RE_REL_2ND.search(q):
+        return Extract(("second_last",))
+    if _RE_REL_LAST.search(q):
+        return Extract(("last",))
+    if _RE_REL_FRONT.search(q):
+        return Extract(("front",))
+    pr = _RE_PAGE_REF.search(q)
+    if pr and _RE_PAGE_CONTENT.search(q):
+        return Extract(("printed", int(pr.group(1))))
+    return None
+
+
+def _g_title(q):
+    return Lookup("title") if _RE_TITLE.search(q) else None
+
+
+def _g_elements(q):
+    mm = _RE_ELEM.search(q)
+    if not mm:
+        return None
+    kind = mm.group(1).lower()
+    combined = bool(re.search(r"tables?\s+and\s+(figures?|images?)|figures?\s+and\s+tables?", q, re.I))
+    excluding = bool(re.search(r"excluding|without|except", q, re.I))
+    return Count(("element", kind, combined, excluding))
+
+
+def _g_references(q):
+    return Count(("ref",)) if _RE_REFS.search(q) else None
+
+
+def _g_sections(q):
+    mm = _RE_SECTIONS.search(q)
+    if not mm:
+        return None
+    unit = mm.group(1).lower()
+    return Count(("heading", "subsection" if unit.startswith("subsection") else "section", unit))
+
+
+def _g_pages(q):
+    if not _RE_PAGES_TOTAL.search(q):
+        return None
+    if re.search(r"excluding|without|except", q, re.I):
+        return None
+    return Count(("page",))
+
+
+def _g_words(q):
+    if not _RE_WORDS.search(q):
+        return None
+    pr = _RE_PAGE_REF.search(q)
+    if pr:
+        return Count(("word",), scope=("page_printed", int(pr.group(1))))
+    return Count(("word",))
+
+
+# 文法(优先级 = 顺序),与旧 _RESOLVERS 一一对应,保证行为等价。footnotes 永远弃权 -> 无规则。
+_GRAMMAR = [_g_mention, _g_authors, _g_date, _g_abbrev, _g_locate, _g_extract, _g_title,
+            _g_elements, _g_references, _g_sections, _g_pages, _g_words]
+
+
+def parse(q: str):
+    """问题 -> 候选查询列表(按优先级)。多数题只匹配一条;门控再从中择优/弃权。"""
+    out = []
+    for rule in _GRAMMAR:
+        try:
+            query = rule(q)
+        except Exception:
+            query = None
+        if query is not None:
+            out.append(query)
+    return out
+
+
+# =====================================================================================
+# 解释器:evaluate(Q, D) -> Fact | None。把类型化查询在文档模型上确定性执行。
+# =====================================================================================
+_ELEM_TYPES = {"figure": ("image", "chart"), "figures": ("image", "chart"),
+               "image": ("image",), "images": ("image",),
+               "table": ("table",), "tables": ("table",),
+               "equation": ("equation",), "equations": ("equation",),
+               "chart": ("chart",), "charts": ("chart",),
+               "illustration": ("image",), "illustrations": ("image",)}
+
+
+def _eval_count(m: DocModel, query: Count):
+    head = query.unit[0]
+    if head == "page":
+        v, conf, _ = COUNT(m, U_PAGE())
+        return Fact("pages", v, conf,
+                    f"[Programmatically verified: the document has {v} physical pages.]", "pdf")
+    if head == "word":
+        if query.scope[0] == "page_printed":
+            printed = query.scope[1]
+            phys = m.page_map.to_physical(printed)
+            if not phys:
+                return None
+            wc = len(m.page_text(phys, max_chars=10**9).split())
+            return Fact("words_page", wc, 0.45,
+                        f"[Approximate word count on {m.page_map.frame(printed)} "
+                        f"(from extracted text) = {wc}.]", "pdf")
+        wc, conf, _ = COUNT(m, U_WORD())
+        return Fact("words", wc, conf,
+                    f"[Programmatically counted: the document contains {wc} words "
+                    f"(whitespace-delimited tokens over the extracted text).]", "pdf")
+    if head == "span":
+        target = query.unit[1]
+        variants = _normalize_mention_variants(target)
+        best, _, ev = COUNT(m, U_SPAN(variants))
+        if best == 0:
+            return None
+        counts = ev.get("counts") or [best]
+        tot = sum(counts) or best
+        agree = max(counts) / tot if tot else 1.0
+        conf = round(0.85 * agree, 2)
+        if len(target.replace(" ", "")) <= 2:        # 短目标易假阳性 -> 压低置信
+            conf = min(conf, 0.5)
+        return Fact("mention", best, conf,
+                    f'[Programmatically verified: the phrase "{target}" appears {best} times '
+                    f"in the document (including tables).]", "full_text+tables")
+    if head == "element":
+        if not m.has_elements or m.page_count > 30:    # 需 content_list;长报告图被切碎 -> 弃权
+            return None
+        _, kind, combined, excluding = query.unit
+        ap = _appendix_page(m) if excluding else None
+        scope = S_EXCLUDING(ap) if ap is not None else S_WHOLE
+        if combined:
+            figs, _, _ = COUNT(m, U_ELEMENT(("image", "chart")), scope)
+            tbls, _, _ = COUNT(m, U_ELEMENT(("table",)), scope)
+            total = figs + tbls
+            if total < 1:
+                return None
+            conf = round(min(1.0, m.page_count / total), 2) if total else 0.0
+            return Fact("elements_sum", total, conf,
+                        f"[Programmatically counted from the parsed document: {figs} figures + "
+                        f"{tbls} tables = {total} in total.]", "content_list")
+        cnt, conf, _ = COUNT(m, U_ELEMENT(_ELEM_TYPES.get(kind, ("image",))), scope)
+        if cnt < 1:
+            return None
+        return Fact("elements", cnt, conf,
+                    f"[Programmatically counted from the parsed document: {cnt} {kind}.]", "content_list")
+    if head == "ref":
+        if not m.has_elements:
+            return None
+        cnt, conf, _ = COUNT(m, U_REF())
+        if cnt is None:
+            return None
+        return Fact("references", cnt, conf,
+                    f"[Approximate reference count from the parsed bibliography ≈ {cnt}.]", "content_list")
+    if head == "heading":
+        if not m.has_elements:
+            return None
+        hk, unitword = query.unit[1], query.unit[2]
+        cnt, conf, _ = COUNT(m, U_HEADING(hk))
+        if cnt < 1:
+            return None
+        return Fact("sections", cnt, conf,
+                    f"[Approximate count of top-level {unitword} from parsed headings ≈ {cnt}; "
+                    f"section granularity may differ from the reference.]", "content_list")
+    return None
+
+
+def _eval_extract(m: DocModel, query: Extract):
+    ref = query.ref
     phys = None
     label = ""
-    clean = True   # 页引用是否被唯一/可靠解析(自检信号)
-    fs = _RE_FIRST_SENT.search(q)
-    pr = _RE_PAGE_REF.search(q)
-    if fs:
-        printed = int(fs.group(1))
+    clean = True
+    if ref[0] == "first_sent":
+        printed = ref[1]
         phys = m.page_map.to_physical(printed)
         label = m.page_map.frame(printed)
-        clean = m.page_map.confident   # 经印刷→物理映射,可靠度取决于 PageMap 置信
-    elif _RE_REL_2ND.search(q):
+        clean = m.page_map.confident
+    elif ref[0] == "second_last":
         phys = m.page_count - 1 if m.page_count >= 2 else m.page_count
         label = f"second-to-last page ({m.page_map.phys_frame(phys)})"
-    elif _RE_REL_LAST.search(q):
+    elif ref[0] == "last":
         phys = m.page_count
         label = f"last page ({m.page_map.phys_frame(phys)})"
-    elif _RE_REL_FRONT.search(q):
+    elif ref[0] == "front":
         phys = 1
         label = "front page (physical page 1)"
-    elif pr and _RE_PAGE_CONTENT.search(q):
-        printed = int(pr.group(1))
+    elif ref[0] == "printed":
+        printed = ref[1]
         phys = m.page_map.to_physical(printed)
         label = m.page_map.frame(printed)
         clean = m.page_map.confident
@@ -810,89 +876,44 @@ def r_extract_page(m: DocModel, q: str) -> Fact | None:
     return EXTRACT(m, phys, label, clean)
 
 
-def r_authors(m: DocModel, q: str) -> Fact | None:
-    """覆盖:作者数 / 末位作者(从 front_matter 作者区读)。作者区不干净则弃权(保护非回归)。
-    DG_COVERAGE=false 或 DG_LEGACY=true 时关闭(用于复现旧行为/消融)。"""
-    if _dg_env("DG_LEGACY", False) or not _dg_env("DG_COVERAGE", True) or not m.has_elements:
-        return None
-    if _RE_LAST_AUTHOR.search(q):
-        return LOOKUP(m, "last_author")
-    if _RE_AUTHORS_CNT.search(q):
-        return LOOKUP(m, "authors")
+def evaluate(m: DocModel, query):
+    """⟦Q⟧(D):把类型化查询在文档上确定性执行,得 Fact(value, 自检置信) 或 None(不可算->弃权)。"""
+    if isinstance(query, Count):
+        return _eval_count(m, query)
+    if isinstance(query, Locate):
+        return LOCATE(m, query.target)
+    if isinstance(query, Extract):
+        return _eval_extract(m, query)
+    if isinstance(query, Lookup):
+        return LOOKUP(m, query.field)
     return None
 
 
-def r_date(m: DocModel, q: str) -> Fact | None:
-    """覆盖:发布日期。仅当封面/前两页恰好有【唯一】一个 'Month YYYY' 时注入,否则弃权(自检)。"""
-    if _dg_env("DG_LEGACY", False) or not _dg_env("DG_COVERAGE", True):
-        return None
-    if not _RE_DATE_Q.search(q):
-        return None
-    head = " ".join(m.per_page_text[:2]) if m.per_page_text else ""
-    uniq = sorted({d.title() for d in _RE_COVER_DATE.findall(head)})
-    if len(uniq) != 1:      # 0 个或多个 -> 歧义 -> 弃权
-        return None
-    return Fact("date", uniq[0], 0.7,
-                f"[Programmatically extracted from the cover/front matter: the document date is "
-                f"{uniq[0]}.]", "pdf")
-
-
-def r_meta_stats(m: DocModel, q: str) -> Fact | None:
-    """通用统计兜底(页/词/缩写/高频词)——给泛 meta 题,低-中置信。"""
-    if text_stats is None:
-        return None
-    s = text_stats(m.full_text)
-    tw = ", ".join(s["top_words"]) or "n/a"
-    aw = ", ".join(f"{a} ({c}x)" for a, c in s["top_abbrevs"]) or "n/a"
-    return Fact("meta_stats", None, 0.5,
-                f"[Supplementary document statistics (programmatic): total pages = {m.page_count}; "
-                f"approximate word count = {len(m.full_text.split())}; most frequent words = {tw}; "
-                f"most frequent abbreviations = {aw}. Use only if the question asks such document-level stats.]",
-                "pdf")
-
-
-# 路由优先级:具体 -> 泛化。
-_RESOLVERS = [r_mention, r_authors, r_date, r_abbrev_words, r_locate, r_extract_page, r_title,
-              r_elements, r_references, r_sections, r_pages_total, r_words, r_footnotes]
-
-# ===========================================================================
-# L3 门控(确定性可验证门控 deterministic, verifiability-gated injection)
-# ---------------------------------------------------------------------------
-# 每个 Fact 的 confidence 是【实例级、可由输入确定性算出的自检信号】(见各组合子),而非死常数:
-#   pages    : 精确可数            -> 0.95(真确定)
-#   words    : 跨源一致率          -> 1 − |c_pymupdf − c_pypdf| / max(两者)
-#   mention  : 命中集中度 + 短目标惩罚
-#   abbrev   : 头名领先度          -> 1 − f2/f1
-#   elements : 合理度             -> min(1, 页数/计数)
-#   locate   : 命中标题(0.9)/ 否则最密集页占比
-#   title    : H1 唯一性
-#   extract  : 页引用解析可靠度
-#   词数/脚注/章节/参考文献口径不可观测处 -> 自检低 -> 维持弃权(诚实边界)
-# 注入门:inject(f) ⇔ conf(f) ≥ τ_kind。阈值是开发集"校准"出来的常数(数触发准确率,非梯度训练)。
-# 决策论扩展点(V3):若提供 DG_CALIB_FILE(含各 kind 的 baseline 准确率 pbase),则
-#   τ_eff = max(τ_kind, pbase[kind] + margin) —— 即"仅当算子估计答对率 > 基座答对率才注入"。
-#   缺该文件时退回 τ_kind(本次运行)。机制通用:换数据集在其 dev split 上重算 pbase 即可,无写死。
-# ===========================================================================
+# =====================================================================================
+# Layer 3 —— 确定性可验证门控(gate):inject(f) ⇔ conf(f) ≥ τ_kind,否则弃权回退基座。
+# confidence 由各组合子的实例级自检给出(pages 0.95 / words 跨源一致率 / mention 集中度 /
+# abbrev 头名领先度 / elements 合理度 / locate 唯一性 / title H1唯一 ...)——非死常数。
+# 决策论扩展点:给 DG_CALIB_FILE 含 pbase 时 τ_eff = max(τ_kind, pbase+margin)。
+# =====================================================================================
 _THRESHOLD = {
     "mention": 0.6, "extract_page": 0.6, "title": 0.6, "topwords": 0.6, "pages": 0.6,
-    "authors": 0.6, "last_author": 0.6, "date": 0.6,   # 覆盖:作者区不干净(conf 0.45)则弃权
-
-    "abbrev": 0.5,        # 头名领先度≥0.5 = 第一名≥2×第二名才注入
-    "locate": 0.4,        # 命中标题(0.9)或 ≤2 页(0.5)才注入,3+ 页歧义则弃权
-    "elements": 0.8, "elements_sum": 0.8,   # 真实图表数 ≤ ~页数;计数>1.25×页数=被切碎→弃权
-    "references": 0.99, "sections": 0.99,    # 口径不可观测 -> 默认弃权
-    "words": 0.5,                            # 跨源一致率≥0.5(差异<50%)才注入;发散则弃权
-    "words_page": 0.99, "footnotes": 0.99, "meta_stats": 0.99,   # 单页词数/脚注仍弃权(未验证)
+    "authors": 0.6, "last_author": 0.6, "date": 0.6,
+    "abbrev": 0.5,
+    "locate": 0.4,
+    "elements": 0.8, "elements_sum": 0.8,
+    "references": 0.99, "sections": 0.99,
+    "words": 0.5,
+    "words_page": 0.99, "footnotes": 0.99, "meta_stats": 0.99,
 }
 
 # DG_LEGACY=true:恢复旧(64%)的死常数置信度 + first-over-threshold,用于精确 A/B 复现。
 _LEGACY_CONF = {"words": 0.85, "mention": 0.8, "title": 0.7, "extract_page": 0.7,
                 "pages": 0.9, "topwords": 0.7, "words_page": 0.45}
-_LEGACY_THRESHOLD = dict(_THRESHOLD, words=0.6)   # 旧版 words 阈值是 0.6
+_LEGACY_THRESHOLD = dict(_THRESHOLD, words=0.6)
 
 
 def _load_calib():
-    """可选:DG_CALIB_FILE -> {'threshold': {...}, 'pbase': {...}}。缺省则空(用内置阈值、无 V3 floor)。"""
+    """可选:DG_CALIB_FILE -> {'threshold': {...}, 'pbase': {...}}。缺省则空。"""
     path = os.getenv("DG_CALIB_FILE")
     if not path or not os.path.exists(path):
         return {}, {}
@@ -911,20 +932,20 @@ _PBASE_MARGIN = float(os.getenv("DG_PBASE_MARGIN", "0.0") or 0.0)
 def _eff_threshold(kind, base_thr, pbase):
     tau = base_thr.get(kind, 0.6)
     floor = pbase.get(kind)
-    if floor is not None:                       # V3 决策论:注入须超过基座答对率
+    if floor is not None:
         tau = max(tau, float(floor) + _PBASE_MARGIN)
     return tau
 
 
 def ground(question: str, pdf_path: str, content_list_path: str = None,
            model: DocModel = None) -> Fact | None:
-    """框架总入口:建/复用 DocModel -> 解析意图调组合子 -> 实例自检置信 -> 门控/弃权 -> Fact 或 None。
-    门控:默认收集所有触发且过阈的 Fact,取置信最高者(arbitration,治"第一个过阈≠最可信");
-          DG_ARBITRATE=false 退回 first-over-threshold;DG_LEGACY=true 复现旧 64% 行为。"""
+    """框架总入口:build DocModel ─ parse(q) ─ evaluate(Q,D) ─ gate ─ Fact 或 None(弃权)。
+    门控:收集所有触发且过阈的 Fact,取自检最高者(arbitration);DG_ARBITRATE=false 退回 first-over;
+          DG_LEGACY=true 复现旧 64% 行为(死常数置信 + first-over)。"""
     m = model or build_doc_model(pdf_path, content_list_path)
     if m is None:
         return None
-    no_abstain = not _dg_env("DG_ABSTAIN", True)   # DG_ABSTAIN=false:不弃权、全注入(消融用)
+    no_abstain = not _dg_env("DG_ABSTAIN", True)
     legacy = _dg_env("DG_LEGACY", False)
     arbitrate = _dg_env("DG_ARBITRATE", True) and not legacy
     base_thr = _LEGACY_THRESHOLD if legacy else _THRESHOLD
@@ -932,26 +953,25 @@ def ground(question: str, pdf_path: str, content_list_path: str = None,
     if calib_thr:
         base_thr = dict(base_thr, **calib_thr)
 
-    fired = []
-    for r in _RESOLVERS:
+    candidates = []
+    for query in parse(question):
         try:
-            fact = r(m, question)
+            fact = evaluate(m, query)
         except Exception:
             fact = None
         if not (fact and fact.note):
             continue
-        if legacy and fact.kind in _LEGACY_CONF:   # 精确 A/B:还原旧死常数置信度
+        if legacy and fact.kind in _LEGACY_CONF:        # 精确 A/B:还原旧死常数置信度
             fact = replace(fact, confidence=_LEGACY_CONF[fact.kind])
         tau = _eff_threshold(fact.kind, base_thr, pbase)
         if no_abstain or fact.confidence >= tau:
             if not arbitrate:
-                return fact            # first-over-threshold(legacy / 关 arbitration)
-            fired.append(fact)
-    if not fired:
+                return fact
+            candidates.append(fact)
+    if not candidates:
         return None
-    # arbitration:取置信最高者;并列时 Python 稳定排序保留优先级(具体>泛化)。
-    fired.sort(key=lambda f: f.confidence, reverse=True)
-    return fired[0]
+    candidates.sort(key=lambda f: f.confidence, reverse=True)   # 取自检最高;稳定排序保留优先级
+    return candidates[0]
 
 
 # =====================================================================================
