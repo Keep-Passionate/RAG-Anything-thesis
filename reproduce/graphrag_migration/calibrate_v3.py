@@ -91,13 +91,13 @@ hdr = "%-13s %4s %6s %7s %9s" % ("kind", "Ndev", "p_op", "p_base", "decision")
 if SPLIT == "hash":
     hdr += "   %4s %6s %7s" % ("Ntst", "p_op_t", "p_base_t")
 print(hdr)
-calib_pbase = {}
+calib_kinds = {}
 for kind in sorted(agg):
     dv = agg[kind]["dev"]
     pop = dv[1] / dv[0] if dv[0] else 0.0
     pb = dv[2] / dv[0] if dv[0] else 0.0
     dec = "INJECT" if pop > pb + MARGIN else "drop?"
-    calib_pbase[kind] = round(pb, 3)
+    calib_kinds[kind] = {"p_op": round(pop, 3), "p_base": round(pb, 3)}
     row = "%-13s %4d %6.2f %7.2f %9s" % (kind, dv[0], pop, pb, dec)
     if SPLIT == "hash":
         ts = agg[kind]["test"]
@@ -106,7 +106,7 @@ for kind in sorted(agg):
         row += "   %4d %6.2f %7.2f" % (ts[0], popt, pbt)
     print(row)
 
-json.dump({"pbase": calib_pbase}, open(OUT, "w", encoding="utf-8"), indent=2)
-print(f"\nwrote {OUT}")
+json.dump({"threshold": {}, "kinds": calib_kinds}, open(OUT, "w", encoding="utf-8"), indent=2)
+print(f"\nwrote {OUT}  (dg_core 用 DG_CALIB_FILE 读取;kinds 里 p_op<=p_base 的算子会被门控自动弃权)")
 print("decision=INJECT 表示该 kind 算子答对率 > 基座(决策论:该注入);drop? 表示不如基座(应弃权或修)。")
 print("注:小子集(50)按 kind 拆 dev/test 后样本很小,数字仅作机制演示;论文口径用 229 + DG_SPLIT=hash。")
