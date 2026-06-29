@@ -892,10 +892,10 @@ def evaluate(m: DocModel, query):
 
 # =====================================================================================
 # Layer 3 —— 确定性可验证门控(gate),两条件:
-#   ① 实例自检:conf(f) ≥ τ_kind。confidence 由各组合子实例级自检给出(pages 0.95 / words 跨源一致率 /
-#      mention 集中度 / abbrev 头名领先度 / elements 合理度 / locate 唯一性 / title H1唯一 ...),非死常数。
-#   ② 决策论:给 DG_CALIB_FILE(各 kind 的 p_op/p_base)时,仅当 p_op > p_base + margin 才启用该 kind。
-#      = "仅当算子答对率 > 基座答对率才注入"。两条件都过才注入,否则弃权回退基座(期望非回归)。
+#   默认门控(唯一一条):仅当该算子 kind 在留出 dev split 上 p_op > p_base(由 calibrate_v3 校准、
+#     存 DG_CALIB_FILE)才注入,否则弃权回退基座 → 期望非回归。**无手设阈值、无魔法数字。**
+#   实例自检 confidence(pages/words 跨源一致率/mention 集中度/locate 唯一性…)仅用于多命中时仲裁取优。
+# 下面的 _THRESHOLD / _LEGACY_* 仅供 DG_LEGACY=true 的 A/B 消融复现旧行为,不在默认路径使用。
 # =====================================================================================
 _THRESHOLD = {
     "mention": 0.6, "extract_page": 0.6, "title": 0.6, "topwords": 0.6, "pages": 0.6,
@@ -945,18 +945,17 @@ def _kind_enabled(kind, calib_kinds):
 def ground(question: str, pdf_path: str, content_list_path: str = None,
            model: DocModel = None) -> Fact | None:
     """框架总入口:build DocModel ─ parse(q) ─ evaluate(Q,D) ─ gate ─ Fact 或 None(弃权)。
-    门控:收集所有触发且过阈的 Fact,取自检最高者(arbitration);DG_ARBITRATE=false 退回 first-over;
-          DG_LEGACY=true 复现旧 64% 行为(死常数置信 + first-over)。"""
+    门控(默认,唯一一条、无手设阈值):仅当该算子 kind 在留出 dev split 上答对率 p_op > 基座 p_base
+        (calibrate_v3 校准、存 DG_CALIB_FILE)才注入,否则弃权回退基座 → 期望非回归。
+    多命中时取实例自检最高者作仲裁(自检是原理比值,非门控阈值)。
+    消融:DG_ABSTAIN=false 关门控(全注入);DG_LEGACY=true 复现旧死常数+手设阈值+first-over。"""
     m = model or build_doc_model(pdf_path, content_list_path)
     if m is None:
         return None
     no_abstain = not _dg_env("DG_ABSTAIN", True)
     legacy = _dg_env("DG_LEGACY", False)
     arbitrate = _dg_env("DG_ARBITRATE", True) and not legacy
-    base_thr = _LEGACY_THRESHOLD if legacy else _THRESHOLD
-    calib_thr, calib_kinds = ({}, {}) if legacy else _load_calib()
-    if calib_thr:
-        base_thr = dict(base_thr, **calib_thr)
+    calib_kinds = {} if legacy else _load_calib()[1]
 
     candidates = []
     for query in parse(question):
@@ -966,11 +965,15 @@ def ground(question: str, pdf_path: str, content_list_path: str = None,
             fact = None
         if not (fact and fact.note):
             continue
-        if legacy and fact.kind in _LEGACY_CONF:        # 精确 A/B:还原旧死常数置信度
-            fact = replace(fact, confidence=_LEGACY_CONF[fact.kind])
-        # 两条件门控:① 实例自检 conf≥τ_kind;② 决策论(kind 在 dev 上 p_op>p_base 才启用)。
-        gate_ok = (fact.confidence >= base_thr.get(fact.kind, 0.6)
-                   and _kind_enabled(fact.kind, calib_kinds))
+        if legacy:
+            # 旧消融(DG_LEGACY):死常数置信 + 手设阈值 + first-over,仅供 A/B 复现。
+            if fact.kind in _LEGACY_CONF:
+                fact = replace(fact, confidence=_LEGACY_CONF[fact.kind])
+            gate_ok = fact.confidence >= _LEGACY_THRESHOLD.get(fact.kind, 0.6)
+        else:
+            # 默认门控(唯一一条、无手设阈值、无魔法数字):仅当该算子 kind 在留出 dev split 上
+            # 答对率 p_op > 基座 p_base(由 calibrate_v3 校准、存 DG_CALIB_FILE)才注入,否则弃权。
+            gate_ok = _kind_enabled(fact.kind, calib_kinds)
         if no_abstain or gate_ok:
             if not arbitrate:
                 return fact
