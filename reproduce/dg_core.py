@@ -443,6 +443,20 @@ def LOOKUP(m: DocModel, fieldname: str):
         conf = 0.9 if len(h1) == 1 else 0.65
         return Fact("title", title, conf,
                     f'[Programmatically extracted document title: "{title}".]', "content_list")
+    if fieldname in ("authors", "last_author"):
+        names = _author_names(_author_block(m))
+        if not names:
+            return None
+        # 自检 = 作者区是否"干净"(每行一个姓名、无 ' and '/逗号合并):干净则高置信,否则低置信→弃权。
+        clean = not any(re.search(r"\s+and\s+|,", t) for t in _author_block(m))
+        conf = 0.8 if clean else 0.45
+        if fieldname == "last_author":
+            return Fact("last_author", names[-1], conf,
+                        f'[Programmatically extracted from the front matter: the last author listed is '
+                        f'"{names[-1]}".]', "content_list")
+        return Fact("authors", len(names), conf,
+                    f"[Programmatically extracted from the front matter: the paper lists {len(names)} "
+                    f"authors ({', '.join(names[:8])}).]", "content_list")
     return None
 
 
@@ -474,6 +488,12 @@ _RE_TITLE = re.compile(r"\b(document|paper|report|newspaper)\s+title\b|\btitle o
 # 缩写 / 最高频词(16题诊断:dgcore 原先没这两类 resolver→弃权→答错 4+1 题)
 _RE_ABBR = re.compile(r"\b(?:most\s+(?:common|frequent)\s+)?(?:abbreviation|acronym)s?\b", re.I)
 _RE_TOPWORDS = re.compile(r"\b(?:top\s*\d*\s*)?most\s+(?:common|frequent)\s+words?\b", re.I)
+# 覆盖(前页事实):作者数 / 末位作者 / 发布日期
+_RE_AUTHORS_CNT = re.compile(r"how many\s+authors?\b", re.I)
+_RE_LAST_AUTHOR = re.compile(r"\b(?:last|final)\s+author\b", re.I)
+_RE_DATE_Q = re.compile(
+    r"\bwhen (?:was|is)\b|\bwhat (?:date|year)\b|\b(?:release|publication|published|issue)\s+date\b"
+    r"|\bdate (?:of|was|the document)\b", re.I)
 
 
 def _mention_target(q: str):
@@ -539,6 +559,53 @@ def _appendix_page(m: DocModel):
                                                str(it.get("text", "")), re.I):
             return it.get("page_idx")
     return None
+
+
+# ---- front_matter 结构化解析(覆盖前页事实:作者/日期)。论文通用结构,与具体数据集无关。----
+_AFFIL_PREFIX = "*∗†‡§¶"   # ∗ † ‡ § ¶
+
+
+def _author_block(m: DocModel):
+    """页0:level-1 标题之后、首个 level-2 标题(Abstract/Introduction)之前的 text 行 = 作者区。
+    去掉邮箱行/隶属(标记或数字开头)行/过长句子行。返回候选作者文本行。"""
+    if not m.elements:
+        return []
+    started, lines = False, []
+    for it in m.elements:
+        if (it.get("page_idx") or 0) > 0:
+            break
+        lv = it.get("text_level")
+        t = " ".join(str(it.get("text", "")).split())
+        if not started:
+            if lv == 1 and t:
+                started = True
+            continue
+        if lv and lv >= 2:          # 到 Abstract/Introduction 等小节标题 -> 作者区结束
+            break
+        if it.get("type") != "text" or not t:
+            continue
+        if "@" in t or t[0] in _AFFIL_PREFIX or t[0].isdigit():
+            continue                # 邮箱/隶属/脚注行,不是姓名
+        if len(t.split()) > 12:     # 太长 = 摘要/正文渗入,不是作者行
+            continue
+        lines.append(t)
+    return lines
+
+
+def _author_names(lines):
+    """从作者区行抽姓名:行内可能 'A and B and C' 或 'A, B, and C'。姓名 = 2-4 个首字母大写词。"""
+    names = []
+    for t in lines:
+        for p in re.split(r"\s+and\s+|,\s*", t):
+            p = p.strip().strip(_AFFIL_PREFIX + " ")
+            toks = p.split()
+            if 2 <= len(toks) <= 4 and sum(1 for w in toks if w[:1].isupper()) >= 2:
+                names.append(p)
+    return names
+
+
+_MONTHS = ("January|February|March|April|May|June|July|August|September|October|November|December")
+_RE_COVER_DATE = re.compile(r"\b((?:" + _MONTHS + r")\s+\d{4})\b", re.I)
 
 
 # =====================================================================================
@@ -743,6 +810,33 @@ def r_extract_page(m: DocModel, q: str) -> Fact | None:
     return EXTRACT(m, phys, label, clean)
 
 
+def r_authors(m: DocModel, q: str) -> Fact | None:
+    """覆盖:作者数 / 末位作者(从 front_matter 作者区读)。作者区不干净则弃权(保护非回归)。
+    DG_COVERAGE=false 或 DG_LEGACY=true 时关闭(用于复现旧行为/消融)。"""
+    if _dg_env("DG_LEGACY", False) or not _dg_env("DG_COVERAGE", True) or not m.has_elements:
+        return None
+    if _RE_LAST_AUTHOR.search(q):
+        return LOOKUP(m, "last_author")
+    if _RE_AUTHORS_CNT.search(q):
+        return LOOKUP(m, "authors")
+    return None
+
+
+def r_date(m: DocModel, q: str) -> Fact | None:
+    """覆盖:发布日期。仅当封面/前两页恰好有【唯一】一个 'Month YYYY' 时注入,否则弃权(自检)。"""
+    if _dg_env("DG_LEGACY", False) or not _dg_env("DG_COVERAGE", True):
+        return None
+    if not _RE_DATE_Q.search(q):
+        return None
+    head = " ".join(m.per_page_text[:2]) if m.per_page_text else ""
+    uniq = sorted({d.title() for d in _RE_COVER_DATE.findall(head)})
+    if len(uniq) != 1:      # 0 个或多个 -> 歧义 -> 弃权
+        return None
+    return Fact("date", uniq[0], 0.7,
+                f"[Programmatically extracted from the cover/front matter: the document date is "
+                f"{uniq[0]}.]", "pdf")
+
+
 def r_meta_stats(m: DocModel, q: str) -> Fact | None:
     """通用统计兜底(页/词/缩写/高频词)——给泛 meta 题,低-中置信。"""
     if text_stats is None:
@@ -758,8 +852,8 @@ def r_meta_stats(m: DocModel, q: str) -> Fact | None:
 
 
 # 路由优先级:具体 -> 泛化。
-_RESOLVERS = [r_mention, r_abbrev_words, r_locate, r_extract_page, r_title, r_elements,
-              r_references, r_sections, r_pages_total, r_words, r_footnotes]
+_RESOLVERS = [r_mention, r_authors, r_date, r_abbrev_words, r_locate, r_extract_page, r_title,
+              r_elements, r_references, r_sections, r_pages_total, r_words, r_footnotes]
 
 # ===========================================================================
 # L3 门控(确定性可验证门控 deterministic, verifiability-gated injection)
@@ -781,6 +875,8 @@ _RESOLVERS = [r_mention, r_abbrev_words, r_locate, r_extract_page, r_title, r_el
 # ===========================================================================
 _THRESHOLD = {
     "mention": 0.6, "extract_page": 0.6, "title": 0.6, "topwords": 0.6, "pages": 0.6,
+    "authors": 0.6, "last_author": 0.6, "date": 0.6,   # 覆盖:作者区不干净(conf 0.45)则弃权
+
     "abbrev": 0.5,        # 头名领先度≥0.5 = 第一名≥2×第二名才注入
     "locate": 0.4,        # 命中标题(0.9)或 ≤2 页(0.5)才注入,3+ 页歧义则弃权
     "elements": 0.8, "elements_sum": 0.8,   # 真实图表数 ≤ ~页数;计数>1.25×页数=被切碎→弃权
