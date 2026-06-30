@@ -182,8 +182,8 @@ POLICIES = {
 scored = [k for k in gold if acc.get((OPM,) + k) is not None and acc.get((BASEM,) + k) is not None]
 results = {}
 for name, pol in POLICIES.items():
-    res = {"all": [0, 0], "test": [0, 0], "fire": collections.Counter(), "ambiguous": 0,
-           "harm": [], "mc_base": [0, 0], "mc_ours": [0, 0]}   # mc_*: [wins, losses] on test split
+    res = {"all": [0, 0], "test": [0, 0], "fire": collections.Counter(), "ambiguous": 0, "harm": [],
+           "mcb_all": [0, 0], "mcb_test": [0, 0], "mco_all": [0, 0], "mco_test": [0, 0]}  # [wins,losses]
     for (pdf, nq) in scored:
         ao = acc[(OPM, pdf, nq)]
         ab = acc[(BASEM, pdf, nq)]
@@ -206,16 +206,19 @@ for name, pol in POLICIES.items():
         if sc == "test":
             res["test"][0] += a
             res["test"][1] += 1
-            if a == 1 and ab == 0:          # McNemar vs base(paperbase),仅留出 test
-                res["mc_base"][0] += 1
+        ao_ours = acc.get(("ours", pdf, nq))
+        # McNemar 计票:all 与 test 都累(all 仅对无标签策略 all_fire/self_check 引用为合法;见打印注)
+        for scope in (("mcb_all", "mco_all"),) + ((("mcb_test", "mco_test"),) if sc == "test" else ()):
+            kb, ko = scope
+            if a == 1 and ab == 0:
+                res[kb][0] += 1
             elif a == 0 and ab == 1:
-                res["mc_base"][1] += 1
-            ao_ours = acc.get(("ours", pdf, nq))
-            if ao_ours is not None:          # McNemar vs ours(旧已发表)
+                res[kb][1] += 1
+            if ao_ours is not None:
                 if a == 1 and ao_ours == 0:
-                    res["mc_ours"][0] += 1
+                    res[ko][0] += 1
                 elif a == 0 and ao_ours == 1:
-                    res["mc_ours"][1] += 1
+                    res[ko][1] += 1
     results[name] = res
 
 # ---- 打印 ----
@@ -264,15 +267,21 @@ for name, res in results.items():
     row += "   %d" % res["ambiguous"]
     print(row)
 
-print("\n-- McNemar 显著性(留出 test;b=赢/c=输;chi2=(|b-c|-1)^2/(b+c),>3.84≈p<.05,>10.83≈p<.001) --")
-print("%-18s %16s %16s" % ("policy", "vs paperbase", "vs ours"))
+def _chi(wl):
+    w, l = wl
+    return (abs(w - l) - 1) ** 2 / (w + l) if (w + l) else 0.0
+
+
+def _cell(wl):
+    return "b%dc%d X=%.1f" % (wl[0], wl[1], _chi(wl))
+
+
+print("\n-- McNemar 显著性(b=赢/c=输;chi2=(|b-c|-1)^2/(b+c),>3.84≈p<.05,>10.83≈p<.001) --")
+print("   注:all 口径只对【无标签】策略(all_fire/self_check)合法引用;决策论 single/two_cond 用了dev标签,只看 test。")
+print("%-18s %14s %14s %14s %14s" % ("policy", "base(all)", "base(test)", "ours(all)", "ours(test)"))
 for name, res in results.items():
-    wb, lb = res["mc_base"]
-    wo, lo = res["mc_ours"]
-    chib = (abs(wb - lb) - 1) ** 2 / (wb + lb) if (wb + lb) else 0.0
-    chio = (abs(wo - lo) - 1) ** 2 / (wo + lo) if (wo + lo) else 0.0
-    print("%-18s  b%-3d c%-3d chi2=%5.2f   b%-3d c%-3d chi2=%5.2f"
-          % (name, wb, lb, chib, wo, lo, chio))
+    print("%-18s %14s %14s %14s %14s" % (name, _cell(res["mcb_all"]), _cell(res["mcb_test"]),
+                                         _cell(res["mco_all"]), _cell(res["mco_test"])))
 
 print("\n(acc(all)=dev+test 混合仅参考;acc(test)=留出测试集=论文口径。harm=门控后仍错而基座对的注入题。)")
 print("ambig=策略选的 kind≠all-fire 实选 kind(无现成答案;A-vs-B 比较时应≈0,数大则需真跑核验)。")
