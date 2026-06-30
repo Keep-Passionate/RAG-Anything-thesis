@@ -171,6 +171,7 @@ def choose(facts, keep):
 
 POLICIES = {
     "all_fire":          lambda fs: choose(fs, lambda f: True),
+    "self_check(tau)":   lambda fs: choose(fs, lambda f: f.confidence >= TAU.get(f.kind, 0.6)),
     "single(raw)":       lambda fs: choose(fs, lambda f: kind_ok(f.kind, calib_raw)),
     "single(laplace)":   lambda fs: choose(fs, lambda f: kind_ok(f.kind, calib_lap)),
     "two_cond(raw)":     lambda fs: choose(fs, lambda f: f.confidence >= TAU.get(f.kind, 0.6) and kind_ok(f.kind, calib_raw)),
