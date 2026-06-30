@@ -15,10 +15,11 @@
   L1 DocumentModel(build_doc_model):每篇建一次的单一真相源——PageMap(物理↔印刷)/逐页文本/
      canonical 全文 / content_list typed elements。所有算子共用,杜绝口径不一。
   L2 算子代数(COUNT/LOCATE/EXTRACT/LOOKUP)+ 解析文法(_GRAMMAR)+ 解释器(evaluate)。
-  L3 门控(ground 内 gate):每个 Fact 的 confidence 是【实例级、由输入确定性算出的自检】(非死常数);
-     两条件门控:① 实例自检 conf ≥ τ_kind;② 决策论——给 DG_CALIB_FILE(各 kind 的 p_op/p_base)时,
-     仅当该算子在 dev 上 p_op > p_base + margin 才启用("算子答对率 > 基座才注入",期望非回归)。
-     阈值/p_base 由开发集校准(数频率,非梯度训练)→ training-free,可在任意数据集 dev split 重跑。
+  L3 门控(ground 内 gate):单一决策论门控,无手设阈值、无魔法数字——仅当该算子 kind 在留出 dev split 上
+     答对率 p_op > 基座 p_base(+margin)才采纳其注入,否则弃权回退基座 → 期望非回归。p_op/p_base 由
+     calibrate_v3 在 dev 上数频率(Laplace 平滑,小样本不被一条幸运样本采纳)、存 DG_CALIB_FILE;非梯度训练
+     → training-free,可在任意数据集 dev split 重跑。无 calib=观测/全开(校准跑本身);有 calib 但某 kind 未被
+     dev 观测到=保守弃权(不裸奔注入)。实例级自检 confidence 仅用于多命中时仲裁取最自洽者(非门控阈值)。
 
 与 GlobalRAG 区分:GlobalRAG 是【语料级】符号算子(跨文档实体计数/极值/排序);本框架是【单文档】、
 绕检索读原文、且带【确定性可验证门控】(算子仅在自检判定可靠时开口),training-free、跨基座可迁移。
@@ -934,11 +935,15 @@ _PBASE_MARGIN = float(os.getenv("DG_PBASE_MARGIN", "0.0") or 0.0)
 
 
 def _kind_enabled(kind, calib_kinds):
-    """决策论门控(kind 粒度):仅当该算子在 dev 上 p_op > p_base + margin 才启用,否则该类一律弃权。
-    无校准信息 -> 默认启用(= 当前默认行为,不改变结果)。"""
-    info = calib_kinds.get(kind)
-    if not info:
+    """决策论门控(kind 粒度):仅当该算子在 dev 上 p_op > p_base + margin 才采纳,否则该类弃权。
+    三态:① 无 calib(calib_kinds 空)-> 全开(=观测/校准跑本身,不改变结果);
+          ② 有 calib 但该 kind 未被 dev 观测到(缺席)-> 保守弃权(非回归,杜绝裸奔注入);
+          ③ 有该 kind 的 p_op/p_base(已 Laplace 平滑)-> p_op > p_base + margin 才采纳。"""
+    if not calib_kinds:
         return True
+    info = calib_kinds.get(kind)
+    if info is None:
+        return False
     return float(info.get("p_op", 1.0)) > float(info.get("p_base", 0.0)) + _PBASE_MARGIN
 
 

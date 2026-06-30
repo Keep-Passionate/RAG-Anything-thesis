@@ -22,6 +22,7 @@ METHOD = os.getenv("DG_METHOD", "dgcoreV2")
 SPLIT = os.getenv("DG_SPLIT", "none")          # none | hash
 OUT = os.getenv("DG_CALIB_OUT", "/root/autodl-tmp/dgcore_calib.json")
 MARGIN = float(os.getenv("DG_PBASE_MARGIN", "0.0") or 0.0)
+ALPHA = float(os.getenv("DG_LAPLACE", "1") or 0.0)   # Laplace(+1)平滑:小样本不被一条幸运样本采纳
 
 
 def norm(q):
@@ -86,7 +87,13 @@ for (pdf, q), ty in gold.items():
     cell[1] += a_op
     cell[2] += a_base
 
-print(f"method={METHOD}  split={SPLIT}  margin={MARGIN}")
+def smooth(correct, n):
+    """Laplace(+alpha)平滑后的答对率;n 小则收缩向 0.5,杜绝'凭一条幸运样本'。"""
+    denom = n + 2 * ALPHA
+    return (correct + ALPHA) / denom if denom > 0 else 0.0
+
+
+print(f"method={METHOD}  split={SPLIT}  margin={MARGIN}  laplace_alpha={ALPHA}")
 hdr = "%-13s %4s %6s %7s %9s" % ("kind", "Ndev", "p_op", "p_base", "decision")
 if SPLIT == "hash":
     hdr += "   %4s %6s %7s" % ("Ntst", "p_op_t", "p_base_t")
@@ -94,10 +101,13 @@ print(hdr)
 calib_kinds = {}
 for kind in sorted(agg):
     dv = agg[kind]["dev"]
-    pop = dv[1] / dv[0] if dv[0] else 0.0
-    pb = dv[2] / dv[0] if dv[0] else 0.0
+    pop = smooth(dv[1], dv[0])          # 门控用平滑值
+    pb = smooth(dv[2], dv[0])
+    pop_raw = dv[1] / dv[0] if dv[0] else 0.0
+    pb_raw = dv[2] / dv[0] if dv[0] else 0.0
     dec = "INJECT" if pop > pb + MARGIN else "drop?"
-    calib_kinds[kind] = {"p_op": round(pop, 3), "p_base": round(pb, 3)}
+    calib_kinds[kind] = {"n": dv[0], "p_op": round(pop, 3), "p_base": round(pb, 3),
+                         "p_op_raw": round(pop_raw, 3), "p_base_raw": round(pb_raw, 3)}
     row = "%-13s %4d %6.2f %7.2f %9s" % (kind, dv[0], pop, pb, dec)
     if SPLIT == "hash":
         ts = agg[kind]["test"]
@@ -107,6 +117,7 @@ for kind in sorted(agg):
     print(row)
 
 json.dump({"threshold": {}, "kinds": calib_kinds}, open(OUT, "w", encoding="utf-8"), indent=2)
-print(f"\nwrote {OUT}  (dg_core 用 DG_CALIB_FILE 读取;kinds 里 p_op<=p_base 的算子会被门控自动弃权)")
-print("decision=INJECT 表示该 kind 算子答对率 > 基座(决策论:该注入);drop? 表示不如基座(应弃权或修)。")
-print("注:小子集(50)按 kind 拆 dev/test 后样本很小,数字仅作机制演示;论文口径用 229 + DG_SPLIT=hash。")
+print(f"\nwrote {OUT}  (dg_core 用 DG_CALIB_FILE 读取;kinds 里 p_op<=p_base 的算子被门控自动弃权)")
+print("p_op/p_base = Laplace 平滑后的 dev 答对率(门控判据);p_op_raw/p_base_raw 为原始频率(论文表透明展示)。")
+print("decision=INJECT 表示平滑后算子答对率 > 基座(决策论:该注入);drop? 表示不如基座(应弃权或修)。")
+print("注:小子集按 kind 拆 dev/test 后样本小,平滑缓解但仍需大样本;论文口径用 229 + DG_SPLIT=hash。")
