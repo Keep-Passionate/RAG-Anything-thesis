@@ -365,6 +365,10 @@ def LOCATE(m: DocModel, target: str):
     """定位组合子:把 target 定位到【真正讨论它的页】(排除目录"提一嘴")。
     自检 = 命中章节标题(0.9)/ 否则出现最密集页的占比。"""
     tl = target.lower()
+    cands = {tl}                                   # 健壮性:单复数变体("related works"->"related work")
+    _w = tl.split()
+    if _w and _w[-1].endswith("s") and len(_w[-1]) > 3:
+        cands.add(" ".join(_w[:-1] + [_w[-1][:-1]]))
     toc = set()
     for it in m.elements:
         if it.get("text_level") and re.search(r"table of contents|^\s*contents\s*$",
@@ -376,7 +380,8 @@ def LOCATE(m: DocModel, target: str):
     for it in m.elements:
         pg = it.get("page_idx")
         if (isinstance(pg, int) and it.get("text_level") and (pg + 1) not in toc
-                and tl in str(it.get("text", "")).lower() and (pg + 1) not in heading_pages):
+                and any(c in str(it.get("text", "")).lower() for c in cands)
+                and (pg + 1) not in heading_pages):
             heading_pages.append(pg + 1)
     if heading_pages:
         pages, conf = sorted(heading_pages)[:2], 0.9
@@ -385,7 +390,7 @@ def LOCATE(m: DocModel, target: str):
         for i, t in enumerate(m.per_page_text):
             if (i + 1) in toc:
                 continue
-            c = _flex_count(t, target)
+            c = max((_flex_count(t, cand) for cand in cands), default=0)
             if c > 0:
                 hits[i + 1] = c
         if not hits:
@@ -621,6 +626,7 @@ def _locate_target(q: str):
         if m:
             t = " ".join(m.group(1).split()).strip(" '\"‘’“”.")
             t = re.sub(r"\b(begin|start|located|presented|detailed)\b.*$", "", t, flags=re.I).strip()
+            t = re.sub(r"^(?:about|the|a|an)\s+", "", t, flags=re.I).strip()   # 去引导词(治"about the related works")
             if 2 <= len(t) <= 60 and len(t.split()) <= 8 and not re.match(
                     r"^(it|them|this|that|these|those|the\s+(document|report|paper))\b", t, re.I):
                 return t
@@ -797,7 +803,12 @@ def _eval_count(m: DocModel, query: Count):
         variants = _normalize_mention_variants(target)
         best, _, ev = COUNT(m, U_SPAN(variants))
         if best == 0:
-            return None
+            # 健壮性:正文未命中 -> 回退到含表格正文再数一次(治"短语只出现在表格里",如封面/财报表格)。
+            alt = [_flex_count(m.element_text_with_tables(), v) for v in variants]
+            best = max(alt, default=0)
+            ev = {"counts": alt}
+            if best == 0:
+                return None
         counts = ev.get("counts") or [best]
         tot = sum(counts) or best
         agree = max(counts) / tot if tot else 1.0
