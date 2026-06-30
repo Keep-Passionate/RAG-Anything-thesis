@@ -182,7 +182,8 @@ POLICIES = {
 scored = [k for k in gold if acc.get((OPM,) + k) is not None and acc.get((BASEM,) + k) is not None]
 results = {}
 for name, pol in POLICIES.items():
-    res = {"all": [0, 0], "test": [0, 0], "fire": collections.Counter(), "ambiguous": 0, "harm": []}
+    res = {"all": [0, 0], "test": [0, 0], "fire": collections.Counter(), "ambiguous": 0,
+           "harm": [], "mc_base": [0, 0], "mc_ours": [0, 0]}   # mc_*: [wins, losses] on test split
     for (pdf, nq) in scored:
         ao = acc[(OPM, pdf, nq)]
         ab = acc[(BASEM, pdf, nq)]
@@ -205,6 +206,16 @@ for name, pol in POLICIES.items():
         if sc == "test":
             res["test"][0] += a
             res["test"][1] += 1
+            if a == 1 and ab == 0:          # McNemar vs base(paperbase),仅留出 test
+                res["mc_base"][0] += 1
+            elif a == 0 and ab == 1:
+                res["mc_base"][1] += 1
+            ao_ours = acc.get(("ours", pdf, nq))
+            if ao_ours is not None:          # McNemar vs ours(旧已发表)
+                if a == 1 and ao_ours == 0:
+                    res["mc_ours"][0] += 1
+                elif a == 0 and ao_ours == 1:
+                    res["mc_ours"][1] += 1
     results[name] = res
 
 # ---- 打印 ----
@@ -252,6 +263,16 @@ for name, res in results.items():
         row += " %5d/%-4d %6.1f%%" % (tc, tt, 100 * tc / tt if tt else 0)
     row += "   %d" % res["ambiguous"]
     print(row)
+
+print("\n-- McNemar 显著性(留出 test;b=赢/c=输;chi2=(|b-c|-1)^2/(b+c),>3.84≈p<.05,>10.83≈p<.001) --")
+print("%-18s %16s %16s" % ("policy", "vs paperbase", "vs ours"))
+for name, res in results.items():
+    wb, lb = res["mc_base"]
+    wo, lo = res["mc_ours"]
+    chib = (abs(wb - lb) - 1) ** 2 / (wb + lb) if (wb + lb) else 0.0
+    chio = (abs(wo - lo) - 1) ** 2 / (wo + lo) if (wo + lo) else 0.0
+    print("%-18s  b%-3d c%-3d chi2=%5.2f   b%-3d c%-3d chi2=%5.2f"
+          % (name, wb, lb, chib, wo, lo, chio))
 
 print("\n(acc(all)=dev+test 混合仅参考;acc(test)=留出测试集=论文口径。harm=门控后仍错而基座对的注入题。)")
 print("ambig=策略选的 kind≠all-fire 实选 kind(无现成答案;A-vs-B 比较时应≈0,数大则需真跑核验)。")
