@@ -36,4 +36,9 @@ run_cond noAbstain   qa_results_dg_noabstain.json   DG_ABSTAIN=false
 run_cond mentTables  qa_results_dg_menttab.json     DG_MENTION_TABLES=true
 run_cond reframe     qa_results_dg_reframe.json     DG_PAGEMAP_REFRAME=true
 run_cond noMetaStats qa_results_dg_nometa.json      DG_META_STATS=false
+# 逐算子留一法(IP&M tab:ablation)：default 减去每个 offX = 该算子净贡献。
+run_cond offCount    qa_results_dg_offcount.json    DG_OFF_COUNT=true
+run_cond offLocate   qa_results_dg_offlocate.json   DG_OFF_LOCATE=true
+run_cond offExtract  qa_results_dg_offextract.json  DG_OFF_EXTRACT=true
+run_cond offLookup   qa_results_dg_offlookup.json   DG_OFF_LOOKUP=true
 echo "MATRIX ALL DONE $(date)" | tee -a "$LOG"
