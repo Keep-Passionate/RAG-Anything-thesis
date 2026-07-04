@@ -789,6 +789,20 @@ _GRAMMAR = [_g_mention, _g_contract_date, _g_authors, _g_date, _g_abbrev, _g_loc
             _g_title, _g_elements, _g_references, _g_sections, _g_pages, _g_words]
 
 
+def _op_disabled(query) -> bool:
+    """逐算子消融开关(留一法):DG_OFF_COUNT/LOCATE/EXTRACT/LOOKUP=true 时丢弃该类查询。
+    默认全 false=四算子全开(主实验口径,零影响)。用于 DocBench meta 上做逐算子贡献表。"""
+    if isinstance(query, Count) and _dg_env("DG_OFF_COUNT", False):
+        return True
+    if isinstance(query, Locate) and _dg_env("DG_OFF_LOCATE", False):
+        return True
+    if isinstance(query, Extract) and _dg_env("DG_OFF_EXTRACT", False):
+        return True
+    if isinstance(query, Lookup) and _dg_env("DG_OFF_LOOKUP", False):
+        return True
+    return False
+
+
 def parse(q: str):
     """问题 -> 候选查询列表(按优先级)。多数题只匹配一条;门控再从中择优/弃权。"""
     out = []
@@ -797,7 +811,7 @@ def parse(q: str):
             query = rule(q)
         except Exception:
             query = None
-        if query is not None:
+        if query is not None and not _op_disabled(query):
             out.append(query)
     return out
 
