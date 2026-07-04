@@ -453,6 +453,19 @@ def LOOKUP(m: DocModel, fieldname: str):
         return Fact("date", uniq[0], 0.7,
                     f"[Programmatically extracted from the cover/front matter: the document date is "
                     f"{uniq[0]}.]", "pdf")
+    if fieldname == "contract_date":
+        # 合同生效日(extensibility)：在前3页找 effective/as of/dated 语境附近的日期；缺则退全文。
+        head = " ".join(m.per_page_text[:3]) if m.per_page_text else m.full_text[:6000]
+        cands = _RE_CONTRACT_DATE.findall(head) or _RE_CONTRACT_DATE.findall(m.full_text)
+        cands = [" ".join(c.split()) for c in cands if c]
+        if not cands:
+            return None
+        from collections import Counter
+        date, freq = Counter(cands).most_common(1)[0]
+        conf = round(min(0.95, 0.55 + 0.4 * freq / len(cands)), 2)   # 唯一/高频 -> 高置信
+        return Fact("contract_date", date, conf,
+                    f"[Programmatically extracted from the contract text: the effective date of this "
+                    f"agreement is {date}.]", "pdf")
     if fieldname in ("abbrev", "topwords"):
         if text_stats is None:
             return None
@@ -580,6 +593,21 @@ _RE_DATE_Q = re.compile(
     r"\bwhen (?:was|is)\b|\bwhat (?:date|year)\b|\b(?:release|publication|published|issue)\s+date\b"
     r"|\bdate (?:of|was|the document)\b", re.I)
 
+# —— 可扩展性(extensibility)算子：法律合同"生效日"typed extractor ——
+# 默认关(DG_CONTRACT_DATE)，仅合同域(Kleister 等)开启；DocBench 冻结算子不受影响
+# （其题面无"agreement/effective date"，且此规则默认弃权）。与"零改动泛化"声明分开写。
+_RE_CONTRACT_DATE_Q = re.compile(r"effective date|become effective|\bagreement\b.*\b(?:date|effective)\b",
+                                 re.I)
+_MONTHS_FULL = ("January|February|March|April|May|June|July|August|September|October|November|December")
+_DATE_STR = (r"(?:(?:" + _MONTHS_FULL + r")\s+\d{1,2},?\s+\d{4}"        # January 1, 2015
+             r"|\d{1,2}(?:st|nd|rd|th)?\s+day\s+of\s+(?:" + _MONTHS_FULL + r"),?\s+\d{4}"  # 1st day of March, 2003
+             r"|\d{1,2}\s+(?:" + _MONTHS_FULL + r"),?\s+\d{4}"          # 1 March 2003
+             r"|\d{4}-\d{2}-\d{2}"                                      # 2015-01-01
+             r"|\d{1,2}/\d{1,2}/\d{2,4})")                             # 3/1/2015
+_RE_CONTRACT_DATE = re.compile(
+    r"(?:as of|effective(?:\s+date)?(?:\s+is)?\s*:?|dated(?:\s+as of)?|entered into(?:\s+as of)?"
+    r"|made(?:\s+and\s+entered\s+into)?(?:\s+as of)?)\s+(?:the\s+)?(" + _DATE_STR + r")", re.I)
+
 
 def _mention_target(q: str):
     m = re.search(r'["“‘\']([^"”’\']{1,60})["”’\']', q)
@@ -669,6 +697,13 @@ def _g_date(q):
     return Lookup("date") if _RE_DATE_Q.search(q) else None
 
 
+def _g_contract_date(q):
+    # 可扩展性算子，默认关；只在 DG_CONTRACT_DATE=true（合同域）时对"生效日"题触发。
+    if not _dg_env("DG_CONTRACT_DATE", False):
+        return None
+    return Lookup("contract_date") if _RE_CONTRACT_DATE_Q.search(q) else None
+
+
 def _g_abbrev(q):
     if text_stats is None or not _dg_env("DG_META_STATS", True):
         return None
@@ -750,8 +785,8 @@ def _g_words(q):
 
 
 # 文法(优先级 = 顺序),与旧 _RESOLVERS 一一对应,保证行为等价。footnotes 永远弃权 -> 无规则。
-_GRAMMAR = [_g_mention, _g_authors, _g_date, _g_abbrev, _g_locate, _g_extract, _g_title,
-            _g_elements, _g_references, _g_sections, _g_pages, _g_words]
+_GRAMMAR = [_g_mention, _g_contract_date, _g_authors, _g_date, _g_abbrev, _g_locate, _g_extract,
+            _g_title, _g_elements, _g_references, _g_sections, _g_pages, _g_words]
 
 
 def parse(q: str):
@@ -911,7 +946,7 @@ def evaluate(m: DocModel, query):
 # =====================================================================================
 _THRESHOLD = {
     "mention": 0.6, "extract_page": 0.6, "title": 0.6, "topwords": 0.6, "pages": 0.6,
-    "authors": 0.6, "last_author": 0.6, "date": 0.6,
+    "authors": 0.6, "last_author": 0.6, "date": 0.6, "contract_date": 0.6,
     "abbrev": 0.5,
     "locate": 0.4,
     "elements": 0.8, "elements_sum": 0.8,
