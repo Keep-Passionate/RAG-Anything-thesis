@@ -19,11 +19,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import random
 import re
-import shutil
 import sys
 import urllib.request
 import zipfile
@@ -148,6 +148,43 @@ def _load_coco(core_root: Path, split: str):
     return data.get("images", []), by_image
 
 
+def _index_members(names) -> dict[str, str]:
+    """Map useful suffixes (COCO/val.json, PNG/foo.png) to archive members."""
+    idx = {}
+    for name in names:
+        clean = name.replace("\\", "/")
+        parts = clean.split("/")
+        if len(parts) >= 2:
+            idx["/".join(parts[-2:])] = name
+        idx[parts[-1]] = name
+    return idx
+
+
+def _load_coco_remote(url: str, split: str):
+    try:
+        from remotezip import RemoteZip
+    except Exception as exc:
+        raise RuntimeError(
+            "Selective download requires remotezip: pip install remotezip"
+        ) from exc
+
+    print(f"Opening remote zip index: {url}", flush=True)
+    rz = RemoteZip(url)
+    member_index = _index_members(rz.namelist())
+    key = f"COCO/{split}.json"
+    member = member_index.get(key)
+    if member is None:
+        rz.close()
+        raise FileNotFoundError(f"Could not find {key} in remote zip")
+    print(f"Reading {member} from remote zip", flush=True)
+    with rz.open(member) as f:
+        data = json.load(io.TextIOWrapper(f, encoding="utf-8"))
+    by_image = defaultdict(list)
+    for ann in data.get("annotations", []):
+        by_image[ann["image_id"]].append(ann)
+    return rz, member_index, data.get("images", []), by_image
+
+
 def _class_name(category_id: int) -> str | None:
     # DocLayNet COCO uses 1-based category ids in the raw annotations.
     idx = category_id - 1
@@ -231,6 +268,35 @@ def _write_pdf(core_root: Path, pages, out_pdf: Path) -> bool:
     return True
 
 
+def _write_pdf_remote(remote_zip, member_index: dict[str, str], pages, out_pdf: Path) -> bool:
+    try:
+        from PIL import Image
+    except Exception as exc:
+        raise RuntimeError("Pillow is required to create PDFs: pip install pillow") from exc
+
+    imgs = []
+    for page in pages:
+        key = f"PNG/{page['file_name']}"
+        member = member_index.get(key) or member_index.get(page["file_name"])
+        if member is None:
+            print(f"Missing PNG member in remote zip: {key}", file=sys.stderr)
+            return False
+        with remote_zip.open(member) as f:
+            data = f.read()
+        im = Image.open(io.BytesIO(data))
+        if im.mode != "RGB":
+            im = im.convert("RGB")
+        imgs.append(im)
+    if not imgs:
+        return False
+    out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    first, rest = imgs[0], imgs[1:]
+    first.save(out_pdf, "PDF", resolution=150.0, save_all=True, append_images=rest)
+    for im in imgs:
+        im.close()
+    return True
+
+
 def _qa_records(counts: Counter, include_zero: bool):
     records = []
     for spec in QA_SPECS:
@@ -254,15 +320,22 @@ def build(args) -> None:
     work_dir = Path(args.work_dir)
     out_root = Path(args.out)
     archive = Path(args.archive) if args.archive else work_dir / "DocLayNet_core.zip"
+    remote_zip = None
+    member_index = {}
 
-    if args.core_dir:
+    if args.selective_download:
+        remote_zip, member_index, images, by_image = _load_coco_remote(args.url, args.split)
+        print("Selective mode: no full DocLayNet zip will be downloaded.", flush=True)
+    elif args.core_dir:
         core_root = _find_core_root(Path(args.core_dir))
+        print(f"Core root: {core_root}", flush=True)
+        images, by_image = _load_coco(core_root, args.split)
     else:
         _download(args.url, archive)
         core_root = _find_core_root(_extract_core(archive, work_dir / "DocLayNet_core"))
+        print(f"Core root: {core_root}", flush=True)
+        images, by_image = _load_coco(core_root, args.split)
 
-    print(f"Core root: {core_root}", flush=True)
-    images, by_image = _load_coco(core_root, args.split)
     docs = _group_documents(images, by_image)
     selected = _select_docs(docs, args)
     print(f"Split={args.split}; documents={len(docs)}; selected={len(selected)}", flush=True)
@@ -280,7 +353,10 @@ def build(args) -> None:
 
         pdf_path = doc_dir / f"{doc_id}.pdf"
         if not args.no_pdf and not pdf_path.exists():
-            ok = _write_pdf(core_root, pages, pdf_path)
+            if args.selective_download:
+                ok = _write_pdf_remote(remote_zip, member_index, pages, pdf_path)
+            else:
+                ok = _write_pdf(core_root, pages, pdf_path)
             if not ok:
                 skipped_pdf += 1
                 continue
@@ -330,6 +406,8 @@ def build(args) -> None:
     (out_root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     (out_root / "dataset_card.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
+    if remote_zip is not None:
+        remote_zip.close()
 
 
 def parse_args():
@@ -339,6 +417,11 @@ def parse_args():
     ap.add_argument("--core-dir", default="", help="Existing extracted DocLayNet core directory.")
     ap.add_argument("--archive", default="", help="Existing or target DocLayNet_core.zip path.")
     ap.add_argument("--url", default=DOCLAYNET_CORE_URL)
+    ap.add_argument(
+        "--selective-download",
+        action="store_true",
+        help="Use HTTP range requests to read only COCO/<split>.json and selected PNG pages from the remote zip.",
+    )
     ap.add_argument("--split", default="val", choices=["train", "val", "test"])
     ap.add_argument("--limit-docs", type=int, default=80)
     ap.add_argument("--min-pages", type=int, default=2)
