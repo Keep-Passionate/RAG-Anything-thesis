@@ -25,6 +25,7 @@ import os
 import random
 import re
 import sys
+import time
 import urllib.request
 import zipfile
 from collections import Counter, defaultdict
@@ -239,7 +240,8 @@ def _select_docs(docs, args):
     candidates.sort(key=lambda x: (x[0], len(x[1])))
     rng = random.Random(args.seed)
     rng.shuffle(candidates)
-    return candidates[: args.limit_docs] if args.limit_docs else candidates
+    limit = args.candidate_docs or args.limit_docs
+    return candidates[:limit] if limit else candidates
 
 
 def _write_pdf(core_root: Path, pages, out_pdf: Path) -> bool:
@@ -268,7 +270,32 @@ def _write_pdf(core_root: Path, pages, out_pdf: Path) -> bool:
     return True
 
 
-def _write_pdf_remote(remote_zip, member_index: dict[str, str], pages, out_pdf: Path) -> bool:
+def _read_remote_member(remote_zip, member: str, retries: int, retry_sleep: float) -> bytes:
+    last = None
+    for attempt in range(1, retries + 1):
+        try:
+            with remote_zip.open(member) as f:
+                return f.read()
+        except Exception as exc:
+            last = exc
+            print(
+                f"Remote read failed ({attempt}/{retries}) for {member}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            if attempt < retries:
+                time.sleep(retry_sleep * attempt)
+    raise last
+
+
+def _write_pdf_remote(
+    remote_zip,
+    member_index: dict[str, str],
+    pages,
+    out_pdf: Path,
+    retries: int,
+    retry_sleep: float,
+) -> bool:
     try:
         from PIL import Image
     except Exception as exc:
@@ -281,8 +308,17 @@ def _write_pdf_remote(remote_zip, member_index: dict[str, str], pages, out_pdf: 
         if member is None:
             print(f"Missing PNG member in remote zip: {key}", file=sys.stderr)
             return False
-        with remote_zip.open(member) as f:
-            data = f.read()
+        try:
+            data = _read_remote_member(remote_zip, member, retries, retry_sleep)
+        except Exception as exc:
+            print(
+                f"Giving up on document because {member} could not be read: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            for im in imgs:
+                im.close()
+            return False
         im = Image.open(io.BytesIO(data))
         if im.mode != "RGB":
             im = im.convert("RGB")
@@ -346,6 +382,8 @@ def build(args) -> None:
     skipped_pdf = 0
 
     for idx, (doc_name, pages, counts) in enumerate(selected, 1):
+        if args.limit_docs and len(manifest) >= args.limit_docs:
+            break
         digest = hashlib.sha1(doc_name.encode("utf-8")).hexdigest()[:8]
         doc_id = f"dl_{args.split}_{idx:04d}_{digest}"
         doc_dir = out_root / doc_id
@@ -354,7 +392,14 @@ def build(args) -> None:
         pdf_path = doc_dir / f"{doc_id}.pdf"
         if not args.no_pdf and not pdf_path.exists():
             if args.selective_download:
-                ok = _write_pdf_remote(remote_zip, member_index, pages, pdf_path)
+                ok = _write_pdf_remote(
+                    remote_zip,
+                    member_index,
+                    pages,
+                    pdf_path,
+                    retries=args.remote_retries,
+                    retry_sleep=args.remote_retry_sleep,
+                )
             else:
                 ok = _write_pdf(core_root, pages, pdf_path)
             if not ok:
@@ -424,8 +469,16 @@ def parse_args():
     )
     ap.add_argument("--split", default="val", choices=["train", "val", "test"])
     ap.add_argument("--limit-docs", type=int, default=80)
+    ap.add_argument(
+        "--candidate-docs",
+        type=int,
+        default=0,
+        help="Number of candidate documents to try before stopping at --limit-docs; useful if remote reads fail.",
+    )
     ap.add_argument("--min-pages", type=int, default=2)
     ap.add_argument("--max-pages", type=int, default=30)
+    ap.add_argument("--remote-retries", type=int, default=5)
+    ap.add_argument("--remote-retry-sleep", type=float, default=3.0)
     ap.add_argument("--seed", type=int, default=20260705)
     ap.add_argument(
         "--require-any",
