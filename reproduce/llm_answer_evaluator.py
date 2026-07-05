@@ -1017,10 +1017,16 @@ Respond with a JSON object:
         results_file = os.path.join(
             self.config.output_dir, "llm_evaluation_results.json"
         )
-        results_tmp_file = f"{results_file}.tmp"
+        # tmp 用唯一名（异步并发保存时，固定 .tmp 会被另一协程移走 → os.replace 报
+        # FileNotFoundError；唯一名 + 容错让并发保存互不踩踏）。
+        import uuid
+        results_tmp_file = f"{results_file}.{uuid.uuid4().hex}.tmp"
         with open(results_tmp_file, "w", encoding="utf-8") as f:
             json.dump(self.evaluation_results, f, ensure_ascii=False, indent=2)
-        os.replace(results_tmp_file, results_file)
+        try:
+            os.replace(results_tmp_file, results_file)
+        except FileNotFoundError:
+            pass  # 另一次并发保存已落盘，本次 tmp 已被处理，忽略
 
         # Save the CSV summary.
         summary_data = []
