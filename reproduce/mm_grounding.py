@@ -468,6 +468,11 @@ def ground(
     if q.intent == "table_evidence":
         return _ground_table(q, question, m)
     if q.intent == "visual_evidence":
+        # Conservative default: do not route visual/image/chart questions away
+        # from the backbone's native multimodal retriever unless explicitly
+        # requested. This keeps the layer non-overriding for strong MM backbones.
+        if not _env_on("MM_ENABLE_VISUAL_ROUTING", False):
+            return None
         return _ground_visual(q, question, m)
     return None
 
@@ -537,8 +542,13 @@ def _ground_visual(query: MMQuery, question: str, model: MMDocModel) -> Optional
         elems = [elem] if elem else []
         confidence = 0.92
     else:
+        # Ranked visual routing is speculative: caption/nearby-text lexical
+        # overlap may point to the wrong figure and bias the backbone. Keep it
+        # opt-in, separate from explicit "Figure 2" style routing.
+        if not _env_on("MM_ALLOW_RANKED_VISUAL", False):
+            return None
         elems = _rank_elements(question, model.visuals, limit=_top_k("MM_VISUAL_TOPK", 3))
-        if not elems and _env_on("MM_BROAD_VISUAL_FALLBACK", True):
+        if not elems and _env_on("MM_BROAD_VISUAL_FALLBACK", False):
             elems = [e for e in model.visuals if e.image_path][:_top_k("MM_VISUAL_TOPK", 3)]
             confidence = 0.35
         elif elems:

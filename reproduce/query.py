@@ -290,6 +290,7 @@ async def process_with_rag(
         # 定位相关 figure/table/chart，注入原始证据和 Image Path；不绑定 RAG-Anything 内部。
         mm_ground_model = None
         mm_ground_on = env_on("ENABLE_MM_GROUND")
+        mm_force_vlm = env_on("MM_FORCE_VLM")
         if mm_ground_on:
             from mm_grounding import build_mm_doc_model, summarize_model
             mm_ground_model = build_mm_doc_model(file_path)
@@ -404,7 +405,7 @@ async def process_with_rag(
                     mm_ground_kind = _mm_fact.kind
                     mm_ground_vlm = _mm_fact.requires_vlm
                     mm_ground_evidence = _mm_fact.evidence_count
-                    if _mm_fact.requires_vlm:
+                    if _mm_fact.requires_vlm and mm_force_vlm:
                         q_vlm = True
                         if not vlm_trigger:
                             vlm_trigger = "mm_ground"

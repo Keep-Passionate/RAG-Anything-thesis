@@ -41,7 +41,17 @@ def test_parse_visual_attribute_question():
     assert q.intent == "visual_evidence"
 
 
-def test_explicit_figure_grounding_includes_image_path(tmp_path):
+def test_visual_grounding_abstains_by_default(tmp_path):
+    cl, image = _write_content_list(tmp_path)
+    model = build_mm_doc_model(str(tmp_path / "paper.pdf"), str(cl))
+
+    fact = ground("What color is the sign in Figure 2?", str(tmp_path / "paper.pdf"), model=model)
+
+    assert fact is None
+
+
+def test_explicit_figure_grounding_includes_image_path_when_opted_in(tmp_path, monkeypatch):
+    monkeypatch.setenv("MM_ENABLE_VISUAL_ROUTING", "true")
     cl, image = _write_content_list(tmp_path)
     model = build_mm_doc_model(str(tmp_path / "paper.pdf"), str(cl))
 
