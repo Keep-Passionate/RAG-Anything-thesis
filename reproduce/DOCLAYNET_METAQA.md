@@ -41,6 +41,7 @@ nohup /root/miniconda3/envs/rag/bin/python reproduce/doclaynet_metaqa.py \
   --split val \
   --limit-docs 80 \
   --candidate-docs 140 \
+  --remote-timeout 30 \
   --out /root/autodl-tmp/DocLayNet_MetaQA \
   > /root/autodl-tmp/doclaynet_metaqa_build.log 2>&1 &
 
@@ -67,6 +68,8 @@ DocLayNet_MetaQA/
 - `--candidate-docs` lets the builder try extra candidate documents and stop
   after `--limit-docs` successful outputs. This is useful because occasional
   remote zip range reads may fail with transient server errors.
+- `--remote-timeout` keeps slow remote range reads from hanging indefinitely;
+  timed-out reads are retried according to `--remote-retries`.
 - `--include-zero` includes zero-count element questions. The default omits
   zero-count element questions but always keeps page count.
 - `--require-any Table,Picture,Formula,Section-header` keeps documents with at

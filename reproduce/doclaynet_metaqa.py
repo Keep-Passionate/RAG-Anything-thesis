@@ -161,7 +161,7 @@ def _index_members(names) -> dict[str, str]:
     return idx
 
 
-def _load_coco_remote(url: str, split: str):
+def _load_coco_remote(url: str, split: str, timeout: float):
     try:
         from remotezip import RemoteZip
     except Exception as exc:
@@ -169,8 +169,9 @@ def _load_coco_remote(url: str, split: str):
             "Selective download requires remotezip: pip install remotezip"
         ) from exc
 
+    kwargs = {"timeout": timeout} if timeout and timeout > 0 else {}
     print(f"Opening remote zip index: {url}", flush=True)
-    rz = RemoteZip(url)
+    rz = RemoteZip(url, **kwargs)
     member_index = _index_members(rz.namelist())
     key = f"COCO/{split}.json"
     member = member_index.get(key)
@@ -360,7 +361,11 @@ def build(args) -> None:
     member_index = {}
 
     if args.selective_download:
-        remote_zip, member_index, images, by_image = _load_coco_remote(args.url, args.split)
+        remote_zip, member_index, images, by_image = _load_coco_remote(
+            args.url,
+            args.split,
+            args.remote_timeout,
+        )
         print("Selective mode: no full DocLayNet zip will be downloaded.", flush=True)
     elif args.core_dir:
         core_root = _find_core_root(Path(args.core_dir))
@@ -431,8 +436,11 @@ def build(args) -> None:
         manifest.append(meta)
         total_q += len(records)
 
-        if idx % 10 == 0 or idx == len(selected):
-            print(f"  wrote {idx}/{len(selected)} docs, questions={total_q}", flush=True)
+        print(
+            f"  wrote {len(manifest)}/{args.limit_docs or len(selected)} docs "
+            f"(candidate {idx}/{len(selected)}), questions={total_q}",
+            flush=True,
+        )
 
     summary = {
         "name": "DocLayNet-MetaQA",
@@ -479,6 +487,12 @@ def parse_args():
     ap.add_argument("--max-pages", type=int, default=30)
     ap.add_argument("--remote-retries", type=int, default=5)
     ap.add_argument("--remote-retry-sleep", type=float, default=3.0)
+    ap.add_argument(
+        "--remote-timeout",
+        type=float,
+        default=30.0,
+        help="Per HTTP range request timeout in seconds for selective download. Use 0 to disable.",
+    )
     ap.add_argument("--seed", type=int, default=20260705)
     ap.add_argument(
         "--require-any",
