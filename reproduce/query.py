@@ -20,9 +20,6 @@
                             (治"发表在哪/几节/某节讲什么",与DSG独立,见 doc_outline.py)
   ENABLE_DOC_ANCHOR       : 被点名元素接地——"问某张具体表/图"的题(according to Table 8)
                             按标号确定性定位该元素并注入其内容(与DSG独立,见 doc_anchor.py)
-  ENABLE_MM_GROUND        : 多模态接地层——在检索前定位相关图/表/图表原始证据,
-                            注入 caption/table body/Image Path,并让 VLM 读取命中图片
-                            (可迁移模块,见 mm_grounding.py)
   ENABLE_DOC_LOCATE       : 页码定位接地(Localization)——"X在第几页"的题注入
                             "章节标题→页码"索引,把定位从猜变查表(与DSG独立,见 doc_locate.py)
   ENABLE_RERANK           : DashScope gte-rerank 重排检索结果
@@ -286,16 +283,6 @@ async def process_with_rag(
             else:
                 logger.warning("ENABLE_DOC_LOCATE: no content_list/headings, notes disabled")
 
-        # 多模态接地（ENABLE_MM_GROUND）：整篇只读一次 content_list，查询期按问题
-        # 定位相关 figure/table/chart，注入原始证据和 Image Path；不绑定 RAG-Anything 内部。
-        mm_ground_model = None
-        mm_ground_on = env_on("ENABLE_MM_GROUND")
-        mm_force_vlm = env_on("MM_FORCE_VLM")
-        if mm_ground_on:
-            from mm_grounding import build_mm_doc_model, summarize_model
-            mm_ground_model = build_mm_doc_model(file_path)
-            logger.info("MM grounding ENABLED: %s", summarize_model(mm_ground_model))
-
         # 工具库路由（ENABLE_OPERATOR_LAYER）：用 doc_operators.dispatch 统一调度 DSG+Locate，
         # 复用上面已算好的 doc_stats / locate_index（不重复计算）。默认关=走下面原关键词路由（可一键回退）。
         op_ctx = None
@@ -324,10 +311,6 @@ async def process_with_rag(
             locate_used = False
             dg_used = False
             dg_kind = ""
-            mm_ground_used = False
-            mm_ground_kind = ""
-            mm_ground_vlm = False
-            mm_ground_evidence = 0
             if env_on("ENABLE_DG_CORE"):
                 # —— 统一框架 dg_core：单入口 路由→DocumentModel→确定性 resolver→Fact→低置信弃权 ——
                 # 取代下面散落的 op/关键词/locate 路由;默认关,零回归;子集 A/B 验证后再设默认。
@@ -394,26 +377,10 @@ async def process_with_rag(
                     q_llm = f"{q_llm}\n\n{onote}"
                     outline_used = True
 
-            # mm_grounding：图/表/图表证据接地。它不直接回答视觉题，而是把相关
-            # content_list 元素（caption/table body/Image Path/page）交给生成器和 VLM。
-            if mm_ground_model is not None:
-                from mm_grounding import ground as _mm_ground
-                _mm_fact = _mm_ground(q, file_path, model=mm_ground_model)
-                if _mm_fact:
-                    q_llm = f"{q_llm}\n\n{_mm_fact.note}"
-                    mm_ground_used = True
-                    mm_ground_kind = _mm_fact.kind
-                    mm_ground_vlm = _mm_fact.requires_vlm
-                    mm_ground_evidence = _mm_fact.evidence_count
-                    if _mm_fact.requires_vlm and mm_force_vlm:
-                        q_vlm = True
-                        if not vlm_trigger:
-                            vlm_trigger = "mm_ground"
-
             # doc_anchor：题目点名某张具体表/图时，按标号确定性定位该元素并注入其内容。
             # 与 DSG/outline 独立、纯加法；定位不到则不注入（对 baseline 零风险）。
             anchor_used = False
-            if anchor_items and not mm_ground_used:
+            if anchor_items:
                 ref = detect_element_reference(q)
                 if ref:
                     content = find_referenced_element(anchor_items, *ref)
@@ -512,7 +479,7 @@ async def process_with_rag(
                     vlm_trigger = "evidence"
                 # 新 EMR：视觉意图题在检索端加大 chunk_top_k 多捞图/表证据（不改看图）
                 emr_kw = {}
-                if emr_on and (kw_visual or kw_table or mm_ground_used):
+                if emr_on and (kw_visual or kw_table):
                     emr_kw["chunk_top_k"] = emr_chunk_top_k
                 try:
                     result = await rag.aquery(
@@ -544,11 +511,6 @@ async def process_with_rag(
                 rec["anchor_used"] = anchor_used
             if locate_index is not None:
                 rec["locate_used"] = locate_used
-            if mm_ground_on:
-                rec["mm_ground_used"] = mm_ground_used
-                rec["mm_ground_kind"] = mm_ground_kind
-                rec["mm_ground_vlm"] = mm_ground_vlm
-                rec["mm_ground_evidence"] = mm_ground_evidence
             if env_on("ENABLE_DG_CORE"):
                 rec["dg_used"] = dg_used      # dg_core 是否注入(机制证据,供逐题归因)
                 rec["dg_kind"] = dg_kind      # 触发的 resolver 类型(mention/locate/extract_page/...)
